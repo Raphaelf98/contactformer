@@ -28,11 +28,13 @@ class GraspPredictor:
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if ContactGraspNet is not None:
             self.model = ContactGraspNet(self._contact_grasp_cfg, self.device)
+            print(f'Model has {sum(p.numel() for p in self.model.parameters() if p.requires_grad)} Parameters')
             self.model.eval()
         else:
             self._model_func = importlib.import_module('contact_grasp_net.' + self._contact_grasp_cfg['MODEL']['model'])
             print('model func: ', self._model_func)
             self.model = self._model_func.ContactGraspNet(self._contact_grasp_cfg, self.device)
+            print(f'Model has {sum(p.numel() for p in self.model.parameters() if p.requires_grad)} Parameters')
         self.model.to(self.device)
 
     def load_weights(self,sess,saver,log_dir,mode='test'):

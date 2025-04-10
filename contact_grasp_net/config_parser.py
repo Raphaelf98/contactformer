@@ -58,7 +58,7 @@ def load_config_inference(checkpoint_dir, batch_size=None, max_epoch=None, data_
     """
 
     config_path = os.path.join(checkpoint_dir, 'transformer_config.yaml')
-    config_path = config_path if os.path.exists(config_path) else os.path.join(os.path.dirname(__file__),'config_original.yaml')
+    config_path = config_path if os.path.exists(config_path) else os.path.join(os.path.dirname(__file__),'transformer_config.yaml')
     with open(config_path,'r') as f:
         global_config = yaml.safe_load(f)
 
@@ -82,7 +82,7 @@ def load_config_inference(checkpoint_dir, batch_size=None, max_epoch=None, data_
     global_config['DATA']['classes'] = None
     
     if save:
-        with open(os.path.join(checkpoint_dir, 'config.yaml'),'w') as f:
+        with open(os.path.join(checkpoint_dir, 'transformer_config.yaml'),'w') as f:
             yaml.dump(global_config, f)
 
     return global_config
@@ -119,19 +119,32 @@ def copy_file_if_not_exists(source_file, target_directory):
     :param target_directory: Directory where the file should be copied.
     :return: Path of the copied file if copied, or None if the file already exists.
     """
-    if not os.path.exists(target_directory):
-        os.makedirs(target_directory)  # Ensure the target directory exists
+    # Convert to absolute paths
+    source_file = os.path.abspath(source_file)
+    target_directory = os.path.abspath(target_directory)
+
+    # Ensure target directory exists
+    if not os.path.isdir(target_directory):
+        os.makedirs(target_directory, exist_ok=True)
 
     target_path = os.path.join(target_directory, os.path.basename(source_file))
 
-    if os.path.exists(target_path):
+    
+    # Check if the file already exists (absolute path)
+    if os.path.isfile(target_path):
         print(f"File already exists: {target_path}. Skipping copy.")
         return None
 
+    # Perform the copy operation
     shutil.copy2(source_file, target_path)
-    add_warning(target_path)
-    print(f"File copied to: {target_path} with a warning added.")
-    return target_path
+
+    # Double-check existence after copy
+    if os.path.isfile(target_path):
+        print(f"File successfully copied to: {target_path}")
+        return target_path
+    else:
+        print(f"Error: Copy operation completed but file not found at {target_path}")
+        return None
 
 def force_copy_file(source_file, target_directory):
     """
@@ -148,5 +161,5 @@ def force_copy_file(source_file, target_directory):
 
     shutil.copy2(source_file, target_path)
     add_warning(target_path)
-    print(f"File copied (overwritten if existed) to: {target_path} with a warning added.")
+    print(f"Force copied (overwritten if existed) to: {target_path} with a warning added.")
     return target_path

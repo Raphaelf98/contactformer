@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,7 +13,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
 sys.path.append(os.path.join(CKPT_DIR))
 sys.path.append(os.path.join(BASE_DIR))
 sys.path.append(os.path.join(BASE_DIR, 'Pointcept'))
-
+sys.path.append(os.path.join(CKPT_DIR, 'Pointcept'))
 # from pointcept.models.structure import Point
 # from pointcept.models.modules import PointModule, PointSequential
 from pointcept.models.point_transformer_v3 import PointTransformerV3
@@ -66,7 +67,8 @@ class ContactGraspNetPtV3(nn.Module):
             npoint_0=2048
             radius_list_0=[0.02, 0.04, 0.08]
             nsample_list_0=[32,64,128]
-            mlp_list_0=[[4,8,16],[4,8,16], [8,16,32]]
+            mlp_list_0=[[16,32,64],[16,32,64], [32, 64,64]]
+
             # Instantiate PointTransformerV3 with the loaded parameters
             self.set_abstraction_1 = pointnet2_utils.PointNetSetAbstractionMsg(npoint=npoint_0,radius_list=radius_list_0,nsample_list=nsample_list_0,in_channel=3,mlp_list=mlp_list_0)
             # self.set_abstraction_1 = pointnet2_utils.PointNetSetAbstraction(
@@ -225,7 +227,7 @@ class ContactGraspNetPtV3(nn.Module):
             "batch": batch_indices, # Batch indices
         }
  
-        point_dict['grid_size'] = 0.02  # 0.02 meters per cell   
+        point_dict['grid_size'] = 0.005  # 0.02 meters per cell   
         # point_dict['grid_size'] = torch.tensor(0.02, device=device)     #paper indoor setting 
         # -- Transformer Backbone -- #
         #point_cloud["offset"] = batch2offset(batch_indices)
@@ -416,21 +418,21 @@ class ContactGraspNetPtV2(nn.Module):
 
         self.set_abstraction = self.model_config.get('set_abstraction', False)
         self.fps = self.model_config.get('farthest_point_sampling', False)
-        in_channels = 36  # PT-v2m2 requires 9 input channels
+        in_channels = 192  # PT-v2m2 requires 9 input channels
           # Set for classification tasks (can be modified)
         patch_embed_depth = 1
-        patch_embed_channels = 48
-        patch_embed_groups = 6
-        patch_embed_neighbours = 8
-        enc_depths = (2, 2, 6, 2)
-        enc_channels = (96, 192, 384, 512)
-        enc_groups = (12, 24, 48, 64)
-        enc_neighbours = (16, 16, 16, 16)
-        dec_depths = (1, 1, 1, 1)
-        dec_channels = (48, 96, 192, 384)
-        dec_groups = (6, 12, 24, 48)
-        dec_neighbours = (16, 16, 16, 16)
-        grid_sizes = (0.06, 0.15, 0.375, 0.9375)
+        patch_embed_channels = 96
+        patch_embed_groups = 12
+        patch_embed_neighbours = 16
+        enc_depths = (2, 6, 2)
+        enc_channels = ( 256, 384, 512)
+        enc_groups = ( 24, 48, 64)
+        enc_neighbours = ( 16, 16, 16)
+        dec_depths = (1, 1, 1)
+        dec_channels = (256, 256, 384)
+        dec_groups = (  24, 48, 48)
+        dec_neighbours = ( 16, 16, 16)
+        grid_sizes = ( 0.15, 0.375, 0.9375)
         attn_qkv_bias = True
         pe_multiplier = False
         pe_bias = True
@@ -466,10 +468,12 @@ class ContactGraspNetPtV2(nn.Module):
         )
         
         if self.set_abstraction:
+            print(f'Using set abstraction with {196} feature channels ...')
             npoint_0=2048
             radius_list_0=[0.02, 0.04, 0.08]
             nsample_list_0=[32,64,128]
-            mlp_list_0=[[4,4,12],[4,4,12], [4,4,12]]
+            mlp_list_0=[[16,32,64],[32,32,96], [32,64,96]]
+            
             # Instantiate PointTransformerV3 with the loaded parameters
             self.set_abstraction_1 = pointnet2_utils.PointNetSetAbstractionMsg(npoint=npoint_0,radius_list=radius_list_0,nsample_list=nsample_list_0,in_channel=3,mlp_list=mlp_list_0)
             # self.set_abstraction_1 = pointnet2_utils.PointNetSetAbstraction(
@@ -479,7 +483,7 @@ class ContactGraspNetPtV2(nn.Module):
             #                                                                 in_channel=6,
             #                                                                 mlp=[4,16],  # Only **one** MLP, much simpler
             #                                                                 group_all=False)
-                                        
+        
         
      
         self.input_normals = self.data_config['input_normals']
@@ -553,7 +557,7 @@ class ContactGraspNetPtV2(nn.Module):
 
             feat = torch.zeros_like(coord).to(device).contiguous()  # [N, 3] assuming no additional features
 
-        if self.set_abstraction:
+        elif self.set_abstraction:
             point_cloud = torch.transpose(point_cloud, 1, 2)  # (B, C, N)
 
             device = point_cloud.device
@@ -575,8 +579,23 @@ class ContactGraspNetPtV2(nn.Module):
             batch_indices = torch.arange(batch_size, device=device).repeat_interleave(num_points)
 
             # Compute offset from batch indices
-            offset = batch2offset(batch_indices).to(device)           # Shape: (B*N,)
+            offset = batch2offset(batch_indices).to(device)           # Shape: (48B*N,)
+            pred_points = l1_xyz
+        else: 
+            pred_points = torch.transpose(point_cloud, 1, 2)[:, :3, :]  # (B, C, N)
+            device = point_cloud.device
+       
+            # Reshape from (B, N, 3) -> (B*N, 3)
+            coord = point_cloud.view(-1, 3).to(device).contiguous()   # Flatten all batch samples into one tensor
 
+            # Use coordinates as features (can be replaced with real features)
+            #feat = coord.clone()  # Default: Use (x, y, z) as features
+
+            # Compute offset: Cumulative sum of points per batch
+            #offset = torch.arange(1, batch_size + 1, device=device) * num_points
+            offset = batch2offset(torch.arange(batch_size, device=device).repeat_interleave(num_points)).to(device).contiguous()   
+
+            feat = torch.zeros_like(coord).to(device).contiguous()  # [N, 3] assuming no additional features
         # point_cloud = torch.transpose(point_cloud, 1, 2)  # Now we have batch x channels (3 or 6) x num_points
 
         
@@ -600,9 +619,8 @@ class ContactGraspNetPtV2(nn.Module):
         # Permute to get (batch_size, feature_dim, num_points)
         feat = out.permute(0, 2, 1)  # (B, F, N)
 
-        
-        
-        pred_points = l1_xyz
+       
+        # 
 
         # -- Heads -- #
         # Grasp Direction Head

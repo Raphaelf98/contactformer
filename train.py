@@ -9,10 +9,14 @@ import tqdm
 CONTACT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
-
+THESIS_DIR = os.path.dirname(BASE_DIR)
+THESIS_EXPERIMENTS_DIR = os.path.join(os.path.dirname(CONTACT_DIR), 'thesis_experiments')
 sys.path.append(os.path.join(BASE_DIR))
 
-import config_parser
+sys.path.append(THESIS_EXPERIMENTS_DIR)
+from train_eval.train_eval import train_eval, virtual_train_eval
+
+import contact_grasp_net.config_parser
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data.dataloader import DataLoader
@@ -148,10 +152,16 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
             if not FLAGS.debug:
                 checkpoint_io.save('model_best.pt', epoch_it=epoch_it, it=it,
                     loss_val_best=metric_val_best)
+                
+        if val_every and epoch_it % val_every == 0:
+            abs_checkpoint_dir = os.path.join(os.path.join(CONTACT_DIR, checkpoint_dir), 'model_best.pt')
+            
+            virtual_train_eval('ContactFormer',abs_checkpoint_dir, epoch= epoch_it)
         if optimizer_type == 'adamw':   
             scheduler.step()
 if __name__=="__main__":
-
+    virtual_train_eval('ContactFormer','/home/raphael/thesis/contact_former/checkpoints/ptv2-adam-sa-256-256-bs5-lr/checkpoints/model_best.pt',  epoch= 1)
+    exit(0)
     parser = argparse.ArgumentParser()
     parser.add_argument('--overwrite_ckpt_dir', type=int, required=True, help='0, 1') # applies changes in contact_grasp_dir to files in checkpoint_dir. Attention: This will overwrite files in checkpoint_dir
     parser.add_argument('--model', type=str, required=True, help='ptv2, ptv3')
@@ -174,11 +184,11 @@ if __name__=="__main__":
     model_file_path = base_path / "conatact_graspnet_model.py"
     print("overwrite_ckpt_dir", FLAGS.overwrite_ckpt_dir)
     if FLAGS.overwrite_ckpt_dir: 
-        config_parser.force_copy_file(source_file=transformer_config_path, target_directory=checkpoint_dir)
-        config_parser.force_copy_file(source_file=model_file_path, target_directory=checkpoint_dir)
+        contact_grasp_net.config_parser.force_copy_file(source_file=transformer_config_path, target_directory=checkpoint_dir)
+        contact_grasp_net.config_parser.force_copy_file(source_file=model_file_path, target_directory=checkpoint_dir)
     else:
-        config_parser.copy_file_if_not_exists(source_file=transformer_config_path, target_directory=checkpoint_dir)
-        config_parser.copy_file_if_not_exists(source_file=model_file_path, target_directory=checkpoint_dir)
+        contact_grasp_net.config_parser.copy_file_if_not_exists(source_file=transformer_config_path, target_directory=checkpoint_dir)
+        contact_grasp_net.config_parser.copy_file_if_not_exists(source_file=model_file_path, target_directory=checkpoint_dir)
 
     model_file_path = os.path.join(checkpoint_dir, 'conatact_graspnet_model.py')
     if os.path.exists(model_file_path):
@@ -192,7 +202,7 @@ if __name__=="__main__":
         elif FLAGS.model == 'ptv3':
             ContactGraspNet = conatact_graspnet_model.ContactGraspNetPtV3
             print("Using ContactGraspNetPtV3")
-    # global_config = config_parser.load_config(FLAGS.config_dir)
-    global_config = config_parser.load_config(config_path=checkpoint_dir+"/transformer_config.yaml")
+    # global_config = contact_grasp_net.config_parser.load_config(FLAGS.config_dir)
+    global_config = contact_grasp_net.config_parser.load_config(config_path=checkpoint_dir+"/transformer_config.yaml")
     
-    train(ContactGraspNet, global_config, checkpoint_dir, FLAGS)
+    # train(ContactGraspNet, global_config, checkpoint_dir, FLAGS)
