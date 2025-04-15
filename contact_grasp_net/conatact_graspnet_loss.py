@@ -20,7 +20,9 @@ class ContacGraspNetLoss(nn.Module):
             'pred_contact_offset',  # True
             'pred_contact_approach',
             'pred_grasps_adds',  # True
-            'pred_grasps_adds_gt2pred'
+            'pred_grasps_adds_gt2pred',
+            'pred_grasps_centrality'
+
         ]
         config_weights = [
             'dir_cosine_loss_weight',
@@ -28,7 +30,8 @@ class ContacGraspNetLoss(nn.Module):
             'offset_loss_weight',  # True
             'approach_cosine_loss_weight',
             'adds_loss_weight',  # True
-            'adds_gt2pred_loss_weight'
+            'adds_gt2pred_loss_weight',
+            'centrality_loss_weight' # True
         ]
         for config_loss, config_weight in zip(config_losses, config_weights):
             if global_config['MODEL'][config_loss]:
@@ -104,7 +107,7 @@ class ContacGraspNetLoss(nn.Module):
 
         # -- Grasp Confidence Loss -- #
         if self.score_ce_loss_weight > 0:  # TODO (bin_ce_loss)
-            bin_ce_loss = F.binary_cross_entropy(pred_scores, grasp_success_labels_pc, reduction='none')  # B x N x 1
+            bin_ce_loss = F.binary_cross_entropy(pred_scores, grasp_success_labels_pc, reduction='none')  # F.binary_cross_entropy_with_logits(pred_scores, grasp_success_labels_pc) # # B x N x 1
             if 'topk_confidence' in self.global_config['LOSS'] \
                 and self.global_config['LOSS']['topk_confidence']:
                 bin_ce_loss, _ = torch.topk(bin_ce_loss.squeeze(), k=self.global_config['LOSS']['topk_confidence'])
@@ -214,13 +217,56 @@ class ContacGraspNetLoss(nn.Module):
         if self.adds_gt2pred_loss_weight > 0:
             raise NotImplementedError
         
+        # if self.centrality_loss_weight > 0:
+        #     alpha = 1
+        #     xy_coords = self._project_to_image_plane(pred_points)  # B x N x 2
+        #     xy_center = xy_coords.mean(dim=1, keepdim=True)  # B x 1 x 2
+        #     distances = torch.norm(xy_coords - xy_center, dim=2)  # B x N
+        #     max_distance = distances.max(dim=1, keepdim=True)[0]  # B x 1
+        #     norm_distances = distances / (max_distance + 1e-6)  # B x N
+        #     distances = torch.norm(xy_coords - xy_center, dim=2)  # B x N
+        #     max_distance = distances.max(dim=1, keepdim=True)[0]  # B x 1
+        #     norm_distances = distances / (max_distance + 1e-6)  # B x N
+        #     penalty = torch.exp(norm_distances * alpha) - 1
+        #     grasp_scores = pred_scores.squeeze(-1)
+        #     edge_penalty_loss = ((1 - grasp_scores) * penalty).mean()
+        #     total_loss += self.centrality_loss_weight * edge_penalty_loss
         loss_info = {
             'bin_ce_loss': bin_ce_loss,  # Grasp success loss
             'offset_loss': offset_loss,  # Grasp width loss
             'adds_loss': adds_loss,  # Pose loss
+            # 'centrality_loss': edge_penalty_loss,  # Centrality loss
         }
 
         return total_loss, loss_info
+    def _project_to_image_plane(self, points_3d):
+        """
+        points_3d: B x N x 3
+        intrinsics: 3 x 3
+        returns: B x N x 2 (xy coordinates in the image plane)
+        """
+        pc_mean = points_3d.mean(dim=1, keepdim=True)  # B x 1 x 3
+        points_3d = points_3d + pc_mean  
+        B, N, _ = points_3d.shape
+        print("===> points_3d stats:")
+        print(f"    x: min {points_3d[..., 0].min().item():.4f}, max {points_3d[..., 0].max().item():.4f}")
+        print(f"    y: min {points_3d[..., 1].min().item():.4f}, max {points_3d[..., 1].max().item():.4f}")
+        print(f"    z: min {points_3d[..., 2].min().item():.6f}, max {points_3d[..., 2].max().item():.4f}")
+
+        K = torch.tensor([
+            [616.3653, 0.0,     310.2588],
+            [0.0,      616.2029, 236.5998],
+            [0.0,      0.0,      1.0]
+        ], dtype=torch.float32, device=points_3d.device).unsqueeze(0).repeat(B, 1, 1)
+        ones = torch.ones((B, N, 1), device=points_3d.device)
+        homo_points = torch.cat([points_3d, ones], dim=2)  # B x N x 4
+        # Remove depth to avoid division by 0
+        points_2d_homo = torch.bmm(points_3d, K.transpose(1, 2))  # (B, N, 3)
+        xy_coords = points_2d_homo[:, :, :2] / points_2d_homo[:, :, 2:3].clamp(min=1e-6)  # B x N x 2
+        print("===> xy_coords stats:")
+        print(f"    x: min {xy_coords[..., 0].min().item():.4f}, max {xy_coords[..., 0].max().item():.4f}")
+        print(f"    y: min {xy_coords[..., 1].min().item():.4f}, max {xy_coords[..., 1].max().item():.4f}")
+        return xy_coords
     
     def _bin_label_to_multihot(self, cont_labels, bin_boundaries):
         """

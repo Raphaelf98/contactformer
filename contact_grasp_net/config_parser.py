@@ -137,7 +137,7 @@ def copy_file_if_not_exists(source_file, target_directory):
 
     # Perform the copy operation
     shutil.copy2(source_file, target_path)
-
+    add_warning(target_path)
     # Double-check existence after copy
     if os.path.isfile(target_path):
         print(f"File successfully copied to: {target_path}")

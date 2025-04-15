@@ -6,11 +6,12 @@ from tensorboardX import SummaryWriter
 import numpy as np
 import tqdm
 # Import pointnet library
-CONTACT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONTACT_FORMER_DIR = os.path.dirname(os.path.abspath(__file__))
+CONTACT_DIR = os.path.join(CONTACT_FORMER_DIR, 'contact_grasp_net')
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
 THESIS_DIR = os.path.dirname(BASE_DIR)
-THESIS_EXPERIMENTS_DIR = os.path.join(os.path.dirname(CONTACT_DIR), 'thesis_experiments')
+THESIS_EXPERIMENTS_DIR = os.path.join(os.path.dirname(CONTACT_FORMER_DIR), 'thesis_experiments')
 sys.path.append(os.path.join(BASE_DIR))
 
 sys.path.append(THESIS_EXPERIMENTS_DIR)
@@ -19,10 +20,12 @@ from train_eval.train_eval import train_eval, virtual_train_eval
 import contact_grasp_net.config_parser
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
-from torch.utils.data.dataloader import DataLoader
+from torch.utils.data.dataloader import DataLoader, RandomSampler
 from contact_grasp_net.acronym_dataset import AcronymDataset
 import importlib.util
+from pyvirtualdisplay import Display
 
+import multiprocessing as mp
 
 
 from contact_grasp_net.conatact_graspnet_loss import ContacGraspNetLoss
@@ -38,18 +41,21 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     batch_size = global_config['OPTIMIZER']['batch_size']
+    seed = global_config['OPTIMIZER'].get('seed', 42)
     if not FLAGS.debug:
         
         train_dataset = AcronymDataset(global_config=global_config,debug=False, device=device, train=True)
         test_dataset  = AcronymDataset(global_config=global_config,debug=False, device=device, train=False)
         
-        wandb.init( project="contact grasp net", config={ 
+        wandb.init( project="ContactFormer", config={ 
         "optimizer": global_config['SCHEDULER']['optimizer']['type'],
         "learning_rate": global_config['SCHEDULER']['optimizer']['lr'],
-        "architecture": "cgn-ptv3backbone",
+        "architecture": "cgn-ptv2backbone",
         "dataset": "ACRONYM",
         "batch_size": global_config['OPTIMIZER']['batch_size'],
         "epochs": global_config['SCHEDULER']['epoch'],
+        "encoder": global_config['MODEL']['ENCODER'],
+        "decoder": global_config['MODEL']['DECODER'],
         })
 
     else: 
@@ -57,8 +63,10 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
         test_dataset = AcronymDataset(global_config=global_config,debug=True, device=device, train=False)
         
 
-    train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size, shuffle=True)
+    train_sampler = RandomSampler(train_dataset, generator=torch.Generator().manual_seed(seed))
+    test_sampler = RandomSampler(test_dataset, generator=torch.Generator().manual_seed(seed))
+    train_loader = DataLoader(train_dataset, batch_size, sampler=train_sampler)
+    test_loader = DataLoader(test_dataset, batch_size, sampler=test_sampler)
     
     grasp_net =  ContactGraspNet(global_config, device).to(device)
     loss_fcn = ContacGraspNetLoss(global_config, device).to(device)
@@ -83,6 +91,7 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
     
         
     cur_epoch = load_dict.get('epoch_it', 0)
+    print(f"Resume training at epoch: {cur_epoch}")
     it = load_dict.get('it', 0)
     metric_val_best = load_dict.get('loss_val_best', np.inf)
     print_every = global_config['OPTIMIZER']['print_every'] \
@@ -93,6 +102,7 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
         if 'backup_every' in global_config['OPTIMIZER'] else 0
     val_every = global_config['OPTIMIZER']['val_every'] \
         if 'val_every' in global_config['OPTIMIZER'] else 0
+    robot_val_every = global_config['OPTIMIZER'].get('robot_val_every', 0)
     max_epoch = global_config['OPTIMIZER']['max_epoch']
 
     
@@ -116,6 +126,8 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
             loss.backward()
             # updates model paramters based on computed gradients
             optimizer.step()
+            torch.cuda.empty_cache()
+
             #---------LOGGING----------
             for k, v in loss_info.items():
                 logger.add_scalar(f'train/{k}', v, it)
@@ -146,22 +158,40 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
                 val_loss = np.mean(loss_log)
                 logger.add_scalar('val/val_loss', val_loss, it)
                 if not FLAGS.debug:
-                    wandb.log({"validation/loss": val_loss}, step=it)
-        if val_loss < metric_val_best:
-            metric_val_best = val_loss
-            if not FLAGS.debug:
-                checkpoint_io.save('model_best.pt', epoch_it=epoch_it, it=it,
-                    loss_val_best=metric_val_best)
+                    wandb.log({"validation/loss": val_loss})
+
+                if val_loss < metric_val_best:
+                    metric_val_best = val_loss
+                    checkpoint_io.save('model_best.pt', epoch_it=epoch_it, it=it,loss_val_best=metric_val_best)
                 
-        if val_every and epoch_it % val_every == 0:
-            abs_checkpoint_dir = os.path.join(os.path.join(CONTACT_DIR, checkpoint_dir), 'model_best.pt')
-            
-            virtual_train_eval('ContactFormer',abs_checkpoint_dir, epoch= epoch_it)
+        
         if optimizer_type == 'adamw':   
             scheduler.step()
+
+        if robot_val_every and epoch_it % robot_val_every == 0:
+            print("Running robot validation...")
+            epoch_it = epoch_it + 1
+            checkpoint_io.save('model.pt', epoch_it=epoch_it, it=it, loss_val_best=metric_val_best)
+            return epoch_it
+
+
+def evaluate_model(best_ckpt_path, epoch_it):
+    # 
+    queue = mp.Queue()
+    p = mp.Process(target=eval_worker, args=(epoch_it, best_ckpt_path, queue))
+    p.start()
+    p.join()
+    grasp_success, object_grasp_ratio = queue.get()
+    return  grasp_success, object_grasp_ratio
+
+def eval_worker(epoch_it, ckpt_path, queue):
+    grasp_success, object_grasp_ratio = virtual_train_eval('ContactFormer', ckpt_path, epoch=epoch_it)
+   
+    queue.put((grasp_success, object_grasp_ratio))
+
+    
 if __name__=="__main__":
-    virtual_train_eval('ContactFormer','/home/raphael/thesis/contact_former/checkpoints/ptv2-adam-sa-256-256-bs5-lr/checkpoints/model_best.pt',  epoch= 1)
-    exit(0)
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--overwrite_ckpt_dir', type=int, required=True, help='0, 1') # applies changes in contact_grasp_dir to files in checkpoint_dir. Attention: This will overwrite files in checkpoint_dir
     parser.add_argument('--model', type=str, required=True, help='ptv2, ptv3')
@@ -176,12 +206,16 @@ if __name__=="__main__":
         print(f"CUDA Device Name: {torch.cuda.get_device_name(0)}")
         print(f"CUDA Device Count: {torch.cuda.device_count()}")
         print("Device name:", torch.cuda.get_device_name(torch.cuda.current_device()))
+        gpu_id = 0
+        print("Total Memory:", torch.cuda.get_device_properties(gpu_id).total_memory / 1e6, "MB")
+        print("Allocated Memory:", torch.cuda.memory_allocated(gpu_id) / 1e6, "MB")
+        print("Cached Memory:", torch.cuda.memory_reserved(gpu_id) / 1e6, "MB")
+
     else:
         print("CUDA is not available. Please check your installation.")
 
-    base_path = Path(__file__).resolve().parent
-    transformer_config_path = base_path / "transformer_config.yaml"
-    model_file_path = base_path / "conatact_graspnet_model.py"
+    transformer_config_path = os.path.join(CONTACT_DIR, "transformer_config.yaml")
+    model_file_path = os.path.join(CONTACT_DIR, "conatact_graspnet_model.py")
     print("overwrite_ckpt_dir", FLAGS.overwrite_ckpt_dir)
     if FLAGS.overwrite_ckpt_dir: 
         contact_grasp_net.config_parser.force_copy_file(source_file=transformer_config_path, target_directory=checkpoint_dir)
@@ -202,7 +236,32 @@ if __name__=="__main__":
         elif FLAGS.model == 'ptv3':
             ContactGraspNet = conatact_graspnet_model.ContactGraspNetPtV3
             print("Using ContactGraspNetPtV3")
-    # global_config = contact_grasp_net.config_parser.load_config(FLAGS.config_dir)
     global_config = contact_grasp_net.config_parser.load_config(config_path=checkpoint_dir+"/transformer_config.yaml")
     
-    # train(ContactGraspNet, global_config, checkpoint_dir, FLAGS)
+    disp = Display(visible=0, size=(1024, 768))
+    disp.start()
+    
+    epoch_it = 0
+    
+    import time
+    mp.set_start_method('spawn', force=True)
+    while epoch_it < global_config['OPTIMIZER']['max_epoch']:
+        torch.cuda.empty_cache()  
+        time.sleep(5)
+        epoch_it = train(ContactGraspNet, global_config, FLAGS.ckpt_dir, FLAGS)
+        torch.cuda.empty_cache()  
+        time.sleep(5)
+        print(f"Epoch {epoch_it} completed. Evaluating model...")
+        
+        ckpt_path = os.path.join(CONTACT_FORMER_DIR, FLAGS.ckpt_dir)
+                
+
+        grasp_success, object_grasp_ratio = evaluate_model(ckpt_path, epoch_it)
+        print("Grasp success:", grasp_success, "Object grasp ratio:", object_grasp_ratio)
+        if not FLAGS.debug:
+            wandb.log({
+                'grasp_success': grasp_success,
+                'object_grasp_ratio': object_grasp_ratio
+            })
+                
+    disp.stop()
