@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from contact_grasp_net.mesh_utils import create_gripper
 from contact_grasp_net.utils import *
+from torch_ransac3d.plane import plane_fit
 
 class ContacGraspNetLoss(nn.Module):
     def __init__(self, global_config, device):
@@ -21,7 +22,7 @@ class ContacGraspNetLoss(nn.Module):
             'pred_contact_approach',
             'pred_grasps_adds',  # True
             'pred_grasps_adds_gt2pred',
-            'pred_grasps_centrality'
+            'pred_grasps_support_surface', # True
 
         ]
         config_weights = [
@@ -31,8 +32,13 @@ class ContacGraspNetLoss(nn.Module):
             'approach_cosine_loss_weight',
             'adds_loss_weight',  # True
             'adds_gt2pred_loss_weight',
-            'centrality_loss_weight' # True
+            'support_surface_loss_weight' # True
+
+
         ]
+        alpha=self.global_config['OPTIMIZER']['support_surface_loss_alpha']
+        beta=self.global_config['OPTIMIZER']['support_surface_loss_beta']
+        print(f"===> support surface loss alpha: {alpha:.4f}, beta: {beta:.4f}")
         for config_loss, config_weight in zip(config_losses, config_weights):
             if global_config['MODEL'][config_loss]:
                 setattr(self, config_weight, global_config['OPTIMIZER'][config_weight])
@@ -74,6 +80,7 @@ class ContacGraspNetLoss(nn.Module):
             adds_loss_gt2pred, gt_control_points, pred_control_points, pos_grasps_in_view] -- All losses (not all are used for training)
         """
         # -- Interpolate Labels -- #
+        pc_cam = target['pc_cam']  # B x N x 3
         pos_contact_points = target['pos_contact_points']    # B x M x 3
         pos_contact_dirs = target['pos_contact_dirs']        # B x M x 3
         pos_finger_diffs = target['pos_finger_diffs']        # B x M
@@ -217,26 +224,26 @@ class ContacGraspNetLoss(nn.Module):
         if self.adds_gt2pred_loss_weight > 0:
             raise NotImplementedError
         
-        # if self.centrality_loss_weight > 0:
-        #     alpha = 1
-        #     xy_coords = self._project_to_image_plane(pred_points)  # B x N x 2
-        #     xy_center = xy_coords.mean(dim=1, keepdim=True)  # B x 1 x 2
-        #     distances = torch.norm(xy_coords - xy_center, dim=2)  # B x N
-        #     max_distance = distances.max(dim=1, keepdim=True)[0]  # B x 1
-        #     norm_distances = distances / (max_distance + 1e-6)  # B x N
-        #     distances = torch.norm(xy_coords - xy_center, dim=2)  # B x N
-        #     max_distance = distances.max(dim=1, keepdim=True)[0]  # B x 1
-        #     norm_distances = distances / (max_distance + 1e-6)  # B x N
-        #     penalty = torch.exp(norm_distances * alpha) - 1
-        #     grasp_scores = pred_scores.squeeze(-1)
-        #     edge_penalty_loss = ((1 - grasp_scores) * penalty).mean()
-        #     total_loss += self.centrality_loss_weight * edge_penalty_loss
+        if self.support_surface_loss_weight > 0:
+
+            # B x N x 3
+            plane_equations = self._batch_plane_ransac(pc_cam[:, :, :3])  # B x 4
+            # Compute support surface loss
+
+            support_surface_loss = self._support_surface_loss(pred_points[:, :, :3], pred_scores,
+                                                              plane_equations,
+                                                                alpha=self.global_config['OPTIMIZER']['support_surface_loss_alpha'],
+                                                                beta=self.global_config['OPTIMIZER']['support_surface_loss_beta'])  # B x 1
+                                                            
+            total_loss += self.support_surface_loss_weight * support_surface_loss
         loss_info = {
-            'bin_ce_loss': bin_ce_loss,  # Grasp success loss
-            'offset_loss': offset_loss,  # Grasp width loss
-            'adds_loss': adds_loss,  # Pose loss
-            # 'centrality_loss': edge_penalty_loss,  # Centrality loss
+            'bin_ce_loss': bin_ce_loss,   # Grasp success loss
+            'offset_loss': offset_loss,   # Grasp width loss
+            'adds_loss': adds_loss        # Pose loss
         }
+
+        if self.support_surface_loss_weight > 0:
+            loss_info['support_surface_loss'] = support_surface_loss 
 
         return total_loss, loss_info
     def _project_to_image_plane(self, points_3d):
@@ -396,6 +403,73 @@ class ContacGraspNetLoss(nn.Module):
 
 
         return dir_label, diff_label, grasp_success_label, approach_label, debug
+    
+    
+    def _batch_plane_ransac(self, pc_batch):
+        # Works with both PyTorch tensors and NumPy arrays
+        
+        # or np.random.rand(1000, 3)
+        def _plane_ransac(points):
+            # Fit a plane to the points using RANSAC
+            result = plane_fit(
+                pts=points,
+                thresh=0.01,
+                max_iterations=1000,
+                iterations_per_batch=100,
+                epsilon=1e-8,
+                device=self.device
+            )
+            return result.equation
+
+        plane_eqs = []
+        for i in range(pc_batch.shape[0]):
+            plane = _plane_ransac(pc_batch[i])
+            plane_eqs.append(plane)
+
+        return torch.stack(plane_eqs, dim=0).to(self.device) # return B x 4 tensor with plane equations
+    
+    def _support_surface_loss(self,
+                          contact_points: torch.Tensor,
+                          pred_scores: torch.Tensor,
+                          plane_equation: torch.Tensor,
+                          alpha: float = 1.0,
+                          beta: float = 10.0) -> torch.Tensor:
+        """
+        Compute a normalized exponential distance loss from contact points to a plane.
+    
+        Args:
+            contact_points (torch.Tensor): shape (B, N, 3) — batch of contact points.
+            plane_equation (torch.Tensor): shape (B, 4) — [a, b, c, d] for each batch.
+            alpha (float): scaling factor for exponential penalty.
+            beta (float): growth rate for exponential penalty.
+    
+        Returns:
+            torch.Tensor: scalar normalized mean loss across batch.
+        """
+        # Extract normal vectors and offset (d)
+        normal = plane_equation[:, :3].to(self.device)      # (B, 3)
+        d = plane_equation[:, 3:].to(self.device)           # (B, 1)
+        normal_norm = torch.norm(normal, dim=1, keepdim=True) + 1e-8  # (B, 1)
+    
+        # Compute dot product between normals and contact points: (B, N)
+        dot = torch.einsum('bnd,bd->bn', contact_points, normal) + d  # (B, N)
+    
+        # Compute distances
+        distances = torch.abs(dot) / normal_norm  # (B, N)
+    
+        # Apply exponential penalty: alpha * exp(beta * distance)
+        penalized = pred_scores.squeeze(-1) *alpha * torch.exp(-1*beta * distances)  # (B, N)
+    
+        # Normalize the total penalty per batch (max normalized value = 1)
+        max_penalty = torch.max(penalized, dim=1, keepdim=True)[0] * penalized.shape[1] + 1e-8  # (B, 1)
+        normalized_loss_per_batch = torch.sum(penalized, dim=1) / max_penalty.squeeze(1)  # (B,)
+    
+        # Final scalar loss across the batch
+        normalized_mean_loss = normalized_loss_per_batch.mean()  # scalar
+    
+        return normalized_mean_loss
+
+
 
     def _get_bin_vals(self):
         """

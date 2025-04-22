@@ -7,8 +7,10 @@ import numpy as np
 import tqdm
 # Import pointnet library
 CONTACT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONTACT_FORMER_DIR = os.path.dirname(CONTACT_DIR)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
+CONFIG_DIR = os.path.join(CONTACT_FORMER_DIR, 'config')
 
 sys.path.append(os.path.join(BASE_DIR))
 
@@ -162,16 +164,17 @@ if __name__=="__main__":
     FLAGS = parser.parse_args()
     checkpoint_dir = FLAGS.ckpt_dir
     if torch.cuda.is_available():
-        print("CUDA is available! 🎉")
+        print("CUDA is available!")
         print(f"CUDA Device Name: {torch.cuda.get_device_name(0)}")
         print(f"CUDA Device Count: {torch.cuda.device_count()}")
         print("Device name:", torch.cuda.get_device_name(torch.cuda.current_device()))
     else:
         print("CUDA is not available. Please check your installation.")
 
-    base_path = Path(__file__).resolve().parent
-    transformer_config_path = base_path / "transformer_config.yaml"
-    model_file_path = base_path / "conatact_graspnet_model.py"
+    CONFIG_FILE = FLAGS.config_file or "transformer_config.yaml"
+    transformer_config_path = os.path.join(CONFIG_DIR,CONFIG_FILE)
+
+    model_file_path = os.path.join(CONTACT_DIR, "conatact_graspnet_model.py")
     print("overwrite_ckpt_dir", FLAGS.overwrite_ckpt_dir)
     if FLAGS.overwrite_ckpt_dir: 
         config_parser.force_copy_file(source_file=transformer_config_path, target_directory=checkpoint_dir)
@@ -193,6 +196,6 @@ if __name__=="__main__":
             ContactGraspNet = conatact_graspnet_model.ContactGraspNetPtV3
             print("Using ContactGraspNetPtV3")
     # global_config = config_parser.load_config(FLAGS.config_dir)
-    global_config = config_parser.load_config(config_path=checkpoint_dir+"/transformer_config.yaml")
+    global_config = config_parser.load_config(config_path=os.path.join(checkpoint_dir, CONFIG_FILE))
     
     train(ContactGraspNet, global_config, checkpoint_dir, FLAGS)

@@ -39,7 +39,7 @@ def load_config(config_path):
         global_config = yaml.safe_load(f)
     return global_config
 
-def load_config_inference(checkpoint_dir, batch_size=None, max_epoch=None, data_path=None, arg_configs=[], save=False):
+def load_config_inference(checkpoint_dir,config_file=None, batch_size=None, max_epoch=None, data_path=None, arg_configs=[], save=False):
     """
     Loads yaml config file and overwrites parameters with function arguments and --arg_config parameters
 
@@ -56,9 +56,9 @@ def load_config_inference(checkpoint_dir, batch_size=None, max_epoch=None, data_
     Returns:
         [dict] -- Config
     """
-
-    config_path = os.path.join(checkpoint_dir, 'transformer_config.yaml')
-    config_path = config_path if os.path.exists(config_path) else os.path.join(os.path.dirname(__file__),'transformer_config.yaml')
+    config_file = config_file if config_file is not None else 'transformer_config.yaml'
+    config_path = os.path.join(checkpoint_dir, config_file)
+    config_path = config_path if os.path.exists(config_path) else os.path.join(os.path.dirname(__file__),config_file)
     with open(config_path,'r') as f:
         global_config = yaml.safe_load(f)
 

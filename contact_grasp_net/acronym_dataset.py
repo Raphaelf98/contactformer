@@ -342,7 +342,9 @@ class AcronymDataset(Dataset):
         if 'sigma' in self._depth_augm_config and self._depth_augm_config['sigma'] > 0:
             clip = self._depth_augm_config['clip']
             sigma = self._depth_augm_config['sigma']
-            noise = np.clip(sigma*np.random.randn(*depth.shape), -clip, clip)
+            mask = depth != 0
+            noise = np.zeros_like(depth)
+            noise[mask] = np.clip(sigma * np.random.randn(*depth.shape)[mask], -clip, clip)
             depth += noise
         if 'gaussian_kernel' in self._depth_augm_config and self._depth_augm_config['gaussian_kernel'] > 0:
             kernel = self._depth_augm_config['gaussian_kernel']

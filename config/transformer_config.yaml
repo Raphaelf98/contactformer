@@ -156,7 +156,7 @@ MODEL:
   pred_contact_success: true
   pred_grasps_adds: true
   pred_grasps_adds_gt2pred: false
-  pred_grasps_centrality: true
+  pred_grasps_support_surface: false
   set_abstraction: true
   type: PT-v2
   unpool_backend: map
@@ -184,7 +184,9 @@ OPTIMIZER:
   score_ce_loss_weight: 1
   val_every: 1
   robot_val_every: 5
-  centrality_loss_weight: 1
+  support_surface_loss_weight: 10
+  support_surface_loss_alpha: 0.25
+  support_surface_loss_beta: 50
 SCHEDULER:
   epoch: 50
   eval_epoch: 50

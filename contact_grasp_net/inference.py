@@ -63,7 +63,16 @@ def inference(model, global_config,
         print('Loading ', p)
 
         pc_segments = {}
-        segmap, rgb, depth, cam_K, pc_full, pc_colors = load_available_input_data(p, K=K)
+        try:
+            segmap, rgb, depth, cam_K, pc_full, pc_colors = load_available_input_data(p, K=K)
+        except:
+            segmap = None
+            rgb = None
+            depth = None
+            cam_K = None
+            pc_colors = None
+            pc_full = np.load(p)
+            pc_full = pc_full['pc_cam'][:, :3]
         
         if segmap is None and (local_regions or filter_grasps):
             raise ValueError('Need segmentation map to extract local regions or filter grasps')
@@ -84,8 +93,9 @@ def inference(model, global_config,
                                                                                        forward_passes=forward_passes)  
     
         # Save results
+        print('TYPE', type(contact_pts))
         np.savez('results/predictions_{}'.format(os.path.basename(p.replace('png','npz').replace('npy','npz'))), 
-                  pc_full=pc_full, pred_grasps_cam=pred_grasps_cam, scores=scores, contact_pts=contact_pts, pc_colors=pc_colors)
+                  pc_full=pc_full, pred_grasps_cam=pred_grasps_cam, scores=scores, contact_pts=contact_pts[-1], pc_colors=pc_colors)
 
         # Visualize results          
         # show_image(rgb, segmap)
@@ -99,9 +109,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--ckpt_dir', required=True, help='Log dir')
     parser.add_argument('--model', type=str, default='ptv2', help='ptv2, ptv3')
+    parser.add_argument('--config_file', type=str, default=None, help='Name of .yaml config file, will be read from checkpioint dir')
 
-    # parser.add_argument('--np_path', default='/test_data/8.npy', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
-    parser.add_argument('--np_path', default='/acronym_scenes/005251/005.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+    parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/test_data/8.npy', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+    # parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/acronym_scenes/005251/005.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+    # parser.add_argument('--np_path', default='/home/ssdArray/datasets/grasp_planning_datasets/acronym/acronym/renders/000001/000.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+
     parser.add_argument('--K', default=None, help='Flat Camera Matrix, pass as "[fx, 0, cx, 0, fy, cy, 0, 0 ,1]"')
     parser.add_argument('--z_range', default=[0.2,1.8], help='Z value threshold to crop the input point cloud')
     parser.add_argument('--local_regions', action='store_true', default=False, help='Crop 3D local regions around given segments.')
@@ -111,7 +124,7 @@ if __name__ == "__main__":
     parser.add_argument('--arg_configs', nargs="*", type=str, default=[], help='overwrite config parameters')
     FLAGS = parser.parse_args()
 
-    FLAGS.np_path = BASE_DIR + FLAGS.np_path
+    # FLAGS.np_path = BASE_DIR + FLAGS.np_path
     if torch.cuda.is_available():
        print("CUDA is available! 🎉")
        print(f"CUDA Device Name: {torch.cuda.get_device_name(0)}")
@@ -120,7 +133,7 @@ if __name__ == "__main__":
     else:
         print("CUDA is not available. Please check your installation.")
 
-    global_config = config_parser.load_config_inference(FLAGS.ckpt_dir, batch_size=FLAGS.forward_passes, arg_configs=FLAGS.arg_configs)
+    global_config = config_parser.load_config_inference(FLAGS.ckpt_dir,config_file=FLAGS.config_file, batch_size=FLAGS.forward_passes, arg_configs=FLAGS.arg_configs)
     
     model_file_path = os.path.join(FLAGS.ckpt_dir, 'conatact_graspnet_model.py')
     if os.path.exists(model_file_path):
