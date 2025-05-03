@@ -158,7 +158,7 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
             print("Running robot validation...")
             epoch_it = epoch_it + 1
             checkpoint_io.save('model.pt', epoch_it=epoch_it, it=it, loss_val_best=metric_val_best)
-            return epoch_it
+            return epoch_it, checkpoint_io, it, metric_val_best
 
 
 def evaluate_model(best_ckpt_path, epoch_it,config_file):
@@ -258,10 +258,11 @@ if __name__=="__main__":
     
     import time
     mp.set_start_method('spawn', force=True)
+    current_best_grasp_success = 0
     while epoch_it < global_config['OPTIMIZER']['max_epoch']:
         torch.cuda.empty_cache()  
         time.sleep(5)
-        epoch_it = train(ContactGraspNet, global_config, FLAGS.ckpt_dir, DEBUG)
+        epoch_it, checkpoint_io, it, metric_val_best = train(ContactGraspNet, global_config, FLAGS.ckpt_dir, DEBUG)
         torch.cuda.empty_cache()  
         time.sleep(5)
         print(f"Epoch {epoch_it} completed. Evaluating model...")
@@ -270,6 +271,10 @@ if __name__=="__main__":
                 
 
         grasp_success, object_grasp_ratio = evaluate_model(ckpt_path, epoch_it, CONFIG_FILE)
+        if grasp_success > current_best_grasp_success:
+            current_best_grasp_success = grasp_success
+            print("Best grasp success so far:", current_best_grasp_success)
+            checkpoint_io.save('model_best_val.pt', epoch_it=epoch_it, it=it, loss_val_best=metric_val_best, grasp_success=grasp_success)
         print("Grasp success:", grasp_success, "Object grasp ratio:", object_grasp_ratio)
         if not DEBUG:
             wandb.log({

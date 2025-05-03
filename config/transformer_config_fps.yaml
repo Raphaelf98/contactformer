@@ -105,33 +105,13 @@ MODEL:
     patch_embed_depth: 1
     patch_embed_groups: 40
     patch_embed_neighbours: 16
-  SET_ABSTRACTION:
-    mlp_list:
-    - - 32
-      - 32
-      - 64
-    - - 64
-      - 64
-      - 128
-    - - 64
-      - 96
-      - 128
-    npoint: 2048
-    num_sample_list:
-    - 32
-    - 64
-    - 128
-    radius_list:
-    - 0.02
-    - 0.04
-    - 0.08
   attn_drop_rate: 0.0
   attn_qkv_bias: true
   bin_offsets: true
   dir_vec_length_offset: false
   drop_path_rate: 0.3
   enable_checkpoint: false
-  farthest_point_sampling: false
+  farthest_point_sampling: true
   grasp_conf_head:
     conv1d: 1
     dropout_keep: 0.5
@@ -142,7 +122,7 @@ MODEL:
   - 0.04
   - 0.08
   - 0.16
-  in_channels: 320
+  in_channels: 3
   joint_head:
     conv1d: 4
     dropout_keep: 0.7
@@ -156,8 +136,8 @@ MODEL:
   pred_contact_success: true
   pred_grasps_adds: true
   pred_grasps_adds_gt2pred: false
-  pred_grasps_support_surface: true
-  set_abstraction: true
+  pred_grasps_support_surface: false
+  set_abstraction: false
   type: PT-v2
   unpool_backend: map
 OPTIMIZER:

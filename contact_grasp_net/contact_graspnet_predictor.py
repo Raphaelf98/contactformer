@@ -147,6 +147,7 @@ class GraspPredictor:
         with torch.no_grad():  # Disable gradient computation
             
             pred = self.model(pc_batch)
+            
         pred_grasps_cam = pred['pred_grasps_cam']
         pred_scores = pred['pred_scores']
         pred_points = pred['pred_points']

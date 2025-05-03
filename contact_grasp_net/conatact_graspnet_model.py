@@ -85,7 +85,9 @@ class ContactGraspNetPtV2(nn.Module):
             mlp_list_0= tuple(self.model_config['SET_ABSTRACTION']['mlp_list'])
             print(f'Using set abstraction with {sum([mlp_list_0[i][-1] for i in range(len(mlp_list_0))])} feature channels ...')
             self.set_abstraction_1 = pointnet2_utils.PointNetSetAbstractionMsg(npoint=npoint_0,radius_list=radius_list_0,nsample_list=nsample_list_0,in_channel=3,mlp_list=mlp_list_0)
-       
+        elif self.fps:
+            self.set_abstraction = False
+            print(f'Using FPS with {in_channels} input channels ...')
         
         # Instantiate PointTransformerV2
         self.ptv2 = PointTransformerV2(
@@ -204,15 +206,15 @@ class ContactGraspNetPtV2(nn.Module):
             pred_points = point_cloud
             # Reshape from (B, N, 3) -> (B*N, 3)
             coord = point_cloud.view(-1, 3).to(device).contiguous()   # Flatten all batch samples into one tensor
-
+            pred_points = pred_points.permute(0, 2, 1) 
             # Use coordinates as features (can be replaced with real features)
-            #feat = coord.clone()  # Default: Use (x, y, z) as features
-
+            feat = coord.clone()  # Default: Use (x, y, z) as features
+            num_points = point_cloud.shape[1]  # Number of points after abstraction
             # Compute offset: Cumulative sum of points per batch
             #offset = torch.arange(1, batch_size + 1, device=device) * num_points
             offset = batch2offset(torch.arange(batch_size, device=device).repeat_interleave(2048)).to(device).contiguous()   
 
-            feat = torch.zeros_like(coord).to(device).contiguous()  # [N, 3] assuming no additional features
+            # feat = torch.zeros_like(coord).to(device).contiguous()  # [N, 3] assuming no additional features
 
         elif self.set_abstraction:
             point_cloud = torch.transpose(point_cloud, 1, 2)  # (B, C, N)
@@ -276,10 +278,9 @@ class ContactGraspNetPtV2(nn.Module):
 
         # Permute to get (batch_size, feature_dim, num_points)
         feat = out.permute(0, 2, 1)  # (B, F, N)
-
-       
-        # 
-
+        # Store the feature tensor for later use or visualization
+        # Save the feature tensor to a file
+        
         # -- Heads -- #
         # Grasp Direction Head
         grasp_dir_head = self.grasp_dir_head(feat)
