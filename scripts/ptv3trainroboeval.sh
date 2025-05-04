@@ -3,11 +3,11 @@
 # Set the CUDA deviceexport 
 CUDA_DEVICE_ORDER=PCI_BUS_ID
 
-export CUDA_VISIBLE_DEVICES=4
+export CUDA_VISIBLE_DEVICES=0
 # Define the checkpoint directory
-CKPT_DIR="checkpoints/ptv2-revised-robo-eval"
+CKPT_DIR="checkpoints/ptv3-revised-robo-eval"
 OVERWRITE_CKPT_DIR=1
-MODEL="ptv2"
+MODEL="ptv3"
 which python
 # Run the training script
 taskset -c 30,31,32,33,34,35,36,37,38,39 python /home/raphael/thesis/contact_former/train_robo_eval.py \
@@ -15,4 +15,4 @@ taskset -c 30,31,32,33,34,35,36,37,38,39 python /home/raphael/thesis/contact_for
     --overwrite_ckpt_dir "$OVERWRITE_CKPT_DIR" \
     --model "$MODEL" \
     --config_file "transformer_config.yaml" \
-    --resume "ptv2-revised-robo-eval_20250422111445"
+    --resume ptv3-revised-robo-eval_20250504233450

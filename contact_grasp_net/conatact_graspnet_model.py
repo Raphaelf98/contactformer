@@ -21,7 +21,6 @@ from pointcept.models.point_transformer_v3 import PointTransformerV3
 from pointcept.models.builder import MODELS  # Import the registry
 
 # Create an instance of the model using the registry
-PointTransformerV2 = MODELS.get("PT-v2m2")
 from pointcept.models.utils import batch2offset
 from pointcept.models.utils.structure import Point
 import logging
@@ -32,10 +31,10 @@ from Pointnet_Pointnet2_pytorch.models import pointnet2_utils
 
 
 
-class ContactGraspNetPtV2(nn.Module):
+class ContactGraspNetPtV3(nn.Module):
 
     def __init__(self, global_config, device, verbose=False):
-        super(ContactGraspNetPtV2, self).__init__()
+        super(ContactGraspNetPtV3, self).__init__()
 
         self.global_config = global_config
         self.model_config = global_config['MODEL']
@@ -45,37 +44,40 @@ class ContactGraspNetPtV2(nn.Module):
 
         # Read parameters from model config
         set_abstraction = self.model_config.get('set_abstraction')
-        in_channels = self.model_config.get('in_channels', 3)
-        
-     
-        
+        in_channels = self.model_config.get('in_channels', 3)   
         self.fps = self.model_config.get('farthest_point_sampling')
-        in_channels = self.model_config.get('in_channels')  # PT-v2m2 requires 9 input channels
-        grid_sizes = tuple(self.model_config.get('grid_sizes'))
-        attn_qkv_bias = self.model_config.get('attn_qkv_bias')
-        pe_multiplier = self.model_config.get('pe_multiplier')
-        pe_bias = self.model_config.get('pe_bias')
-        attn_drop_rate = self.model_config.get('attn_drop_rate')
-        drop_path_rate = self.model_config.get('drop_path_rate')
-        enable_checkpoint = self.model_config.get('enable_checkpoint')
-        unpool_backend = self.model_config.get('unpool_backend')
-          # Set for classification tasks (can be modified)
-        patch_embed_cfg = self.model_config['PATCH_EMBEDDING']
-        patch_embed_depth = patch_embed_cfg.get('patch_embed_depth')
-        patch_embed_channels = patch_embed_cfg.get('patch_embed_channels')
-        patch_embed_groups = patch_embed_cfg.get('patch_embed_groups')
-        patch_embed_neighbours = patch_embed_cfg.get('patch_embed_neighbours')
+
+
+         
+        order = tuple(self.model_config.get('order', ("z", "z-trans")))
+        stride = tuple(self.model_config.get('stride', (2, 2, 2, 2)))
+
+        mlp_ratio = self.model_config.get('mlp_ratio', 4)
+        qkv_bias = self.model_config.get('qkv_bias', True)
+        qk_scale = self.model_config.get('qk_scale', None)
+        attn_drop = self.model_config.get('attn_drop', 0.0)
+        proj_drop = self.model_config.get('proj_drop', 0.0)
+        drop_path = self.model_config.get('drop_path', 0.3)
+        pre_norm = self.model_config.get('pre_norm', True)
+        shuffle_orders = self.model_config.get('shuffle_orders', True)
+        enable_rpe = self.model_config.get('enable_rpe', False)
+        enable_flash = self.model_config.get('enable_flash', True)
+        upcast_attention = self.model_config.get('upcast_attention', False)
+        upcast_softmax = self.model_config.get('upcast_softmax', False)
+
+        
 
         encoder_cfg = self.model_config['ENCODER']
         enc_depths = tuple(encoder_cfg.get('enc_depths'))
         enc_channels = tuple(encoder_cfg.get('enc_channels'))
-        enc_groups = tuple(encoder_cfg.get('enc_groups'))
-        enc_neighbours = tuple(encoder_cfg.get('enc_neighbours'))
+        enc_num_head = tuple(encoder_cfg.get('enc_num_head'))
+        enc_patch_size = tuple(encoder_cfg.get('enc_patch_size'))
         decoder_cfg = self.model_config['DECODER']
         dec_depths = tuple(decoder_cfg.get('dec_depths'))
         dec_channels = tuple(decoder_cfg.get('dec_channels'))
-        dec_groups = tuple(decoder_cfg.get('dec_groups'))
-        dec_neighbours = tuple(decoder_cfg.get('dec_neighbours'))
+        dec_num_head = tuple(decoder_cfg.get('dec_num_head'))
+        dec_patch_size = tuple(decoder_cfg.get('dec_patch_size'))
+
 
         if set_abstraction:
             self.set_abstraction = True
@@ -90,29 +92,11 @@ class ContactGraspNetPtV2(nn.Module):
             print(f'Using FPS with {in_channels} input channels ...')
         
         # Instantiate PointTransformerV2
-        self.ptv2 = PointTransformerV2(
-            in_channels=in_channels,
-            num_classes=0,
-            patch_embed_depth=patch_embed_depth,
-            patch_embed_channels=patch_embed_channels,
-            patch_embed_groups=patch_embed_groups,
-            patch_embed_neighbours=patch_embed_neighbours,
-            enc_depths=enc_depths,
-            enc_channels=enc_channels,
-            enc_groups=enc_groups,
-            enc_neighbours=enc_neighbours,
-            dec_depths=dec_depths,
-            dec_channels=dec_channels,
-            dec_groups=dec_groups,
-            dec_neighbours=dec_neighbours,
-            grid_sizes=grid_sizes,
-            attn_qkv_bias=attn_qkv_bias,
-            pe_multiplier=pe_multiplier,
-            pe_bias=pe_bias,
-            attn_drop_rate=attn_drop_rate,
-            drop_path_rate=drop_path_rate,
-            enable_checkpoint=enable_checkpoint,
-            unpool_backend=unpool_backend,
+        self.ptv3 = PointTransformerV3(
+            in_channels, order, stride, enc_depths, enc_channels, enc_num_head, enc_patch_size, 
+            dec_depths, dec_channels, dec_num_head, dec_patch_size, mlp_ratio, qkv_bias, 
+            qk_scale, attn_drop, proj_drop, drop_path, pre_norm, shuffle_orders, enable_rpe, 
+            enable_flash, upcast_attention, upcast_softmax
         )
         
         
@@ -196,90 +180,96 @@ class ContactGraspNetPtV2(nn.Module):
     
     def forward(self,point_cloud):
         
-        point_cloud = point_cloud[:, :, :3] 
-        batch_size, num_points, _ = point_cloud.shape
-
-        if self.fps:
-            centroid_idcs = pointnet2_utils.farthest_point_sample(point_cloud, 2048)
-            point_cloud = pointnet2_utils.index_points(point_cloud, centroid_idcs)
-            device = point_cloud.device
-            pred_points = point_cloud
-            # Reshape from (B, N, 3) -> (B*N, 3)
-            coord = point_cloud.view(-1, 3).to(device).contiguous()   # Flatten all batch samples into one tensor
-            pred_points = pred_points.permute(0, 2, 1) 
-            # Use coordinates as features (can be replaced with real features)
-            feat = coord.clone()  # Default: Use (x, y, z) as features
-            num_points = point_cloud.shape[1]  # Number of points after abstraction
-            # Compute offset: Cumulative sum of points per batch
-            #offset = torch.arange(1, batch_size + 1, device=device) * num_points
-            offset = batch2offset(torch.arange(batch_size, device=device).repeat_interleave(2048)).to(device).contiguous()   
-
-            # feat = torch.zeros_like(coord).to(device).contiguous()  # [N, 3] assuming no additional features
-
-        elif self.set_abstraction:
-            point_cloud = torch.transpose(point_cloud, 1, 2)  # (B, C, N)
+        # Convert from tf to torch ordering
+        if self.set_abstraction:
+            point_cloud = torch.transpose(point_cloud, 1, 2) # Now we have batch x channels (3 or 6) x num_points
 
             device = point_cloud.device
-            l0_xyz = point_cloud[:, :3, :]  # Extract XYZ coordinates (B, 3, N)
-            l0_points = point_cloud[:, 3:6, :] if self.input_normals else l0_xyz.clone()  # (B, C, N)
+            l0_xyz = point_cloud[:, :3, :]
+            l0_points = point_cloud[:, 3:6, :] if self.input_normals else l0_xyz.clone()
 
             # -- PointNet Backbone -- #
-            # Apply Set Abstraction
-            l1_xyz, l1_points = self.set_abstraction_1(l0_xyz, l0_points)
+            # Set Abstraction Layers
+            
+            l1_xyz, l1_points = self.set_abstraction_1(l0_xyz, l0_points) 
 
-            batch_size = l1_xyz.shape[0]
-            num_points = l1_xyz.shape[2]  # Number of points after abstraction
+            batch_size=l1_xyz.shape[0]
+            num_points=l1_xyz.shape[2]
 
-            # Reshape coordinates and features to match transformer input
-            coord = l1_xyz.permute(0, 2, 1).reshape(-1, 3).contiguous().to(device)  # Shape: (B*N, 3)
-            feat = l1_points.permute(0, 2, 1).reshape(-1, l1_points.shape[1]).contiguous().to(device)  # Shape: (B*N, feature_dim)
 
-            # Create batch indices tensor: [B*N] with repeating batch indices
+            # Step 3: Reshape coordinates and features to match transformer input
+            coord = l1_xyz.permute(0, 2, 1).reshape(-1, 3).to(device)  # Shape: [N, 3]
+            feat = l1_points.permute(0, 2, 1).reshape(-1, l1_points.shape[1]).to(device)  # Shape: [N, feature_dim]
+            # Convert from tf to torch ordering
+            #point_cloud = torch.transpose(point_cloud, 1, 2) # Now we have batch x channels (3 or 6) x num_points
+
+            # 2. Create batch index tensor: [batch_size * num_points] with repeating indices
+            batch_indices = torch.arange(batch_size, device=device).repeat_interleave(num_points)        
+        # 3. Create input dictionary for the Point class
+        else:
+            device = point_cloud.device
+            point_cloud = point_cloud[:, :, :3] 
+            centroid_idcs = pointnet2_utils.farthest_point_sample(point_cloud, 2048)
+            point_cloud = pointnet2_utils.index_points(point_cloud, centroid_idcs)
+            point_cloud = torch.transpose(point_cloud, 1, 2)  # Now we have batch x channels (3 or 6) x num_points
+
+            
+            batch_size = point_cloud.shape[0]
+            num_points = point_cloud.shape[2]  # Keep the original number of points
+
+            # Extract coordinates and features
+            coord = point_cloud[:, :3, :].permute(0, 2, 1).reshape(-1, 3).to(device)  # Shape: [N, 3]
+            feat = torch.zeros_like(coord).to(device).contiguous()  # [N, 3] assuming no additional features
+
+
+            # Create batch index tensor: [batch_size * num_points] with repeating indices
             batch_indices = torch.arange(batch_size, device=device).repeat_interleave(num_points)
 
-            # Compute offset from batch indices
-            offset = batch2offset(batch_indices).to(device)           # Shape: (48B*N,)
-            pred_points = l1_xyz
-        else: 
-            pred_points = torch.transpose(point_cloud, 1, 2)[:, :3, :]  # (B, C, N)
-            device = point_cloud.device
-       
-            # Reshape from (B, N, 3) -> (B*N, 3)
-            coord = point_cloud.view(-1, 3).to(device).contiguous()   # Flatten all batch samples into one tensor
-
-            # Use coordinates as features (can be replaced with real features)
-            #feat = coord.clone()  # Default: Use (x, y, z) as features
-
-            # Compute offset: Cumulative sum of points per batch
-            #offset = torch.arange(1, batch_size + 1, device=device) * num_points
-            offset = batch2offset(torch.arange(batch_size, device=device).repeat_interleave(num_points)).to(device).contiguous()   
-
-            feat = torch.zeros_like(coord).to(device).contiguous()  # [N, 3] assuming no additional features
-        # point_cloud = torch.transpose(point_cloud, 1, 2)  # Now we have batch x channels (3 or 6) x num_points
-
-        
-        
         point_dict = {
-            "coord": coord,    # Shape: (B*N, 3)
-            "feat": feat,      # Shape: (B*N, 3) (or real features if available)
-            "offset": offset   # Shape: (B,)
+            "coord": coord,         # Coordinates
+            "feat": feat,  # Use coordinates as features (change if you have real features)
+            "batch": batch_indices, # Batch indices
         }
  
-         
+        point_dict['grid_size'] = 0.005  # 0.02 meters per cell   
+        # point_dict['grid_size'] = torch.tensor(0.02, device=device)     #paper indoor setting 
+        # -- Transformer Backbone -- #
+        #point_cloud["offset"] = batch2offset(batch_indices)
+        out = self.ptv3(point_dict)
+
+
         
-        out = self.ptv2(point_dict)
+        # Extract from out
+        coord = out["coord"]  # (N, 3)
+        feat = out["feat"]    # (N, feature_dim)
+        batch = out["batch"]  # (N,)
 
+        # Get batch size and num points
+        batch_size = batch.max().item() + 1  # Get batch count
+        num_points = coord.shape[0] // batch_size  # Divide total points by batch size
 
-        feat_dim = out.shape[1]  # Extract feature dimension
+        # Reshape into (batch_size, num_points, feature_dim) for the heads
+        feat = feat.view(batch_size, num_points, -1)  # (B, N, F)
+        coord = coord.view(batch_size, num_points, 3) # (B, N, 3)
 
-        # Reshape back to (batch_size, num_points, feature_dim)
-        out = out.view(batch_size, -1, feat_dim)
-        # out = out.view(batch_size, num_points, feat_dim)
+        # Transpose so it matches the format expected by network heads (B, F, N)
+        feat = feat.permute(0, 2, 1)  # (batch_size, feature_dim, num_points)
+        coord = coord.permute(0, 2, 1) # (batch_size, 3, num_points)
 
-        # Permute to get (batch_size, feature_dim, num_points)
-        feat = out.permute(0, 2, 1)  # (B, F, N)
-        # Store the feature tensor for later use or visualization
-        # Save the feature tensor to a file
+        
+        # l1_xyz, l1_points = self.set_abstraction_1(l0_xyz, l0_points)
+        # l2_xyz, l2_points = self.set_abstraction_2(l1_xyz, l1_points)
+        # l3_xyz, l3_points = self.set_abstraction_3(l2_xyz, l2_points)
+        # l4_xyz, l4_points = self.set_abstraction_4(l3_xyz, l3_points)
+
+        # # Feature Propagation Layers
+        # l3_points = self.feature_propagation_3(l3_xyz, l4_xyz, l3_points, l4_points)
+        # l2_points = self.feature_propagation_2(l2_xyz, l3_xyz, l2_points, l3_points)
+        # l1_points = self.feature_propagation_1(l1_xyz, l2_xyz, l1_points, l2_points)
+
+        # l0_points = l1_points
+        pred_points = coord
+
         
         # -- Heads -- #
         # Grasp Direction Head
@@ -427,4 +417,4 @@ if __name__ == "__main__":
 
     global_config = contact_grasp_net.config_parser.load_config('/home/raphael/thesis/contact_former/contact_grasp_net/transformer_config.yaml')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = ContactGraspNetPtV2(global_config, device)
+    model = ContactGraspNetPtV3(global_config, device)
