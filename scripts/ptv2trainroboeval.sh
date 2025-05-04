@@ -3,7 +3,7 @@
 # Set the CUDA deviceexport 
 CUDA_DEVICE_ORDER=PCI_BUS_ID
 
-export CUDA_VISIBLE_DEVICES=6
+export CUDA_VISIBLE_DEVICES=4
 # Define the checkpoint directory
 CKPT_DIR="checkpoints/ptv2-revised-robo-eval"
 OVERWRITE_CKPT_DIR=1
