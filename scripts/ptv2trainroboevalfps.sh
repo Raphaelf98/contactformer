@@ -15,4 +15,5 @@ taskset -c 30,31,32,33,34,35,36,37,38,39 python /home/raphael/thesis/contact_for
     --overwrite_ckpt_dir "$OVERWRITE_CKPT_DIR" \
     --model "$MODEL" \
     --config_file "transformer_config_fps.yaml" \
+    --resume ptv2-revised-robo-eval-fps_20250503171833
    

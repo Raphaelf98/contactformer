@@ -9,3 +9,4 @@ __pycache__/
 Pointcept/
 Pointnet_Pointnet2_pytorch/
 z.*
+*.pkl

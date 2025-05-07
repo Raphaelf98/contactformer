@@ -184,7 +184,7 @@ OPTIMIZER:
   score_ce_loss_weight: 1
   val_every: 1
   robot_val_every: 5
-  support_surface_loss_weight: 10
+  support_surface_loss_weight: 50
   support_surface_loss_alpha: 0.25
   support_surface_loss_beta: 50
 SCHEDULER:
