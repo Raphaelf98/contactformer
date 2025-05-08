@@ -161,17 +161,17 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
             return epoch_it, checkpoint_io, it, metric_val_best
 
 
-def evaluate_model(best_ckpt_path, epoch_it,config_file):
+def evaluate_model(best_ckpt_path, epoch_it,config_file,name=None):
     # 
     queue = mp.Queue()
-    p = mp.Process(target=eval_worker, args=(epoch_it, best_ckpt_path,config_file, queue))
+    p = mp.Process(target=eval_worker, args=(epoch_it, best_ckpt_path,config_file, queue, name))
     p.start()
     p.join()
     grasp_success, object_grasp_ratio = queue.get()
     return  grasp_success, object_grasp_ratio
 
-def eval_worker(epoch_it, ckpt_path, config_file, queue):
-    grasp_success, object_grasp_ratio = virtual_train_eval('ContactFormer', ckpt_path, epoch=epoch_it, CONFIG_FILE=config_file)
+def eval_worker(epoch_it, ckpt_path, config_file,  queue, name=None):
+    grasp_success, object_grasp_ratio = virtual_train_eval('ContactFormer', ckpt_path, epoch=epoch_it, CONFIG_FILE=config_file, NAME=name)
    
     queue.put((grasp_success, object_grasp_ratio))
 
@@ -270,7 +270,7 @@ if __name__=="__main__":
         ckpt_path = os.path.join(CONTACT_FORMER_DIR, FLAGS.ckpt_dir)
                 
 
-        grasp_success, object_grasp_ratio = evaluate_model(ckpt_path, epoch_it, CONFIG_FILE)
+        grasp_success, object_grasp_ratio = evaluate_model(ckpt_path, epoch_it, CONFIG_FILE, FLAGS.model)
         if grasp_success > current_best_grasp_success:
             current_best_grasp_success = grasp_success
             print("Best grasp success so far:", current_best_grasp_success)
