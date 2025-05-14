@@ -159,7 +159,10 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
             epoch_it = epoch_it + 1
             checkpoint_io.save('model.pt', epoch_it=epoch_it, it=it, loss_val_best=metric_val_best)
             return epoch_it, checkpoint_io, it, metric_val_best
-
+        
+        if backup_every and epoch_it % backup_every == 0:
+            checkpoint_io.save(f'model_epoch_{epoch_it}.pt', epoch_it=epoch_it, it=it,
+                loss_val_best=metric_val_best)
 
 def evaluate_model(best_ckpt_path, epoch_it,config_file,name=None):
     # 
@@ -246,7 +249,7 @@ if __name__=="__main__":
             config={ 
                 "optimizer": global_config['SCHEDULER']['optimizer']['type'],
                 "learning_rate": global_config['SCHEDULER']['optimizer']['lr'],
-                "architecture": "cgn-ptv2backbone",
+                "architecture": FLAGS.model,
                 "dataset": "ACRONYM",
                 "batch_size": global_config['OPTIMIZER']['batch_size'],
                 "epochs": global_config['SCHEDULER']['epoch'],

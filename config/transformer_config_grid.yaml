@@ -140,8 +140,8 @@ MODEL:
     dropout_keep: 0.7
   grid_sizes:
   - 0.04
-  - 0.08
-  - 0.16
+  - 0.12
+  - 0.36
   in_channels: 320
   joint_head:
     conv1d: 4
@@ -157,6 +157,8 @@ MODEL:
   pred_grasps_adds: true
   pred_grasps_adds_gt2pred: false
   pred_grasps_support_surface: false
+  pred_grasps_approach: false
+  pred_grasps_contact_approach: false
   set_abstraction: true
   type: PT-v2
   unpool_backend: map
@@ -187,6 +189,11 @@ OPTIMIZER:
   support_surface_loss_weight: 10
   support_surface_loss_alpha: 0.25
   support_surface_loss_beta: 50
+  approach_loss_weight: 1
+  approach_loss_alpha: 10
+  approach_loss_beta: 5
+  approach_contact_loss_weight: 1
+  approach_contact_loss_gamma: 10
 SCHEDULER:
   epoch: 50
   eval_epoch: 50

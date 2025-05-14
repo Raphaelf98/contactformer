@@ -13,7 +13,7 @@ import torch
 import numpy as np
 from contact_grasp_net.contact_graspnet_predictor import GraspPredictor
 from contact_grasp_net import config_parser
-from contact_grasp_net.visualization_utils_o3d import visualize_grasps, show_image
+from contact_grasp_net.visualization_utils_o3d import visualize_grasps, show_image, save_grasps_to_npy
 from contact_grasp_net.checkpoint_io import CheckpointIO
 from contact_grasp_net.data import load_available_input_data
 
@@ -27,7 +27,7 @@ def inference(model, global_config,
               skip_border_objects=False,
               z_range = [0.2,0.6],
               forward_passes=1,
-              K=None,):
+              K=None,dump_dir=None, load_model=None):
     """
     Predict 6-DoF grasp distribution for given model and input data
     
@@ -50,6 +50,10 @@ def inference(model, global_config,
     
     checkpoint_io = CheckpointIO(checkpoint_dir=model_checkpoint_dir, model=grasp_estimator.model)
     try:
+        if load_model is not None:
+            checkpoint_io.load(load_model)
+        else:
+            checkpoint_io.load('model_best.pt')
         load_dict = checkpoint_io.load('model_best.pt')
     except FileExistsError:
         print(f'No model checkpoint found under {model_checkpoint_dir}')
@@ -100,7 +104,7 @@ def inference(model, global_config,
         # Visualize results          
         # show_image(rgb, segmap)
         visualize_grasps(pc_full, pred_grasps_cam, scores, plot_opencv_cam=True, pc_colors=pc_colors)
-        
+        save_grasps_to_npy(pc_full,contact_pts, scores, dump_dir, checkpoint_name=os.path.basename(os.path.normpath(ckpt_dir)) )
     if not glob.glob(input_paths):
         print('No files found: ', input_paths)
         
@@ -110,9 +114,10 @@ if __name__ == "__main__":
     parser.add_argument('--ckpt_dir', required=True, help='Log dir')
     parser.add_argument('--model', type=str, default='ptv2', help='ptv2, ptv3')
     parser.add_argument('--config_file', type=str, default=None, help='Name of .yaml config file, will be read from checkpioint dir')
-
-    parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/test_data/8.npy', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
-    # parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/acronym_scenes/005251/005.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+    parser.add_argument('--load_model', type=str, default=None, help='Name of checkpoint to be loaded')
+    parser.add_argument('--dump_dir', type=str, default='/home/raphael/thesis/contact_former/analysis/results/ContactFormer', help='grasps will be saved here')
+    # parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/test_data/8.npy', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+    parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/acronym_scenes/005251/189.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
     # parser.add_argument('--np_path', default='/home/ssdArray/datasets/grasp_planning_datasets/acronym/acronym/renders/000001/000.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
 
     parser.add_argument('--K', default=None, help='Flat Camera Matrix, pass as "[fx, 0, cx, 0, fy, cy, 0, 0 ,1]"')
@@ -157,4 +162,4 @@ if __name__ == "__main__":
               skip_border_objects=FLAGS.skip_border_objects,
               z_range=eval(str(FLAGS.z_range)),
               forward_passes=FLAGS.forward_passes,
-              K=eval(str(FLAGS.K)))
+              K=eval(str(FLAGS.K)), dump_dir=FLAGS.dump_dir, load_model=FLAGS.load_model)

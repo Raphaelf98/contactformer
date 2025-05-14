@@ -13,7 +13,7 @@ from scipy.spatial.transform import Rotation as R
 import mesh_utils
 from mayavi import mlab
 
-
+from datetime import datetime
 # To fix GLIB open3d error:
 # https://askubuntu.com/questions/1393285/how-to-install-glibcxx-3-4-29-on-ubuntu-20-04
 # To fix xcb error, try uninstalling all qt things
@@ -402,3 +402,44 @@ def draw_grasps(vis, grasps, cam_pose, gripper_openings, colors=[(0, 1., 0)], sh
     # src.update()
     # lines =mlab.pipeline.tube(src, tube_radius=tube_radius, tube_sides=12)
     # mlab.pipeline.surface(lines, color=color, opacity=1.0)
+def save_grasps_to_npy(full_pc, contact_pts, scores, output_dir, checkpoint_name, exp_tag=""):
+    """
+    Saves the point cloud, predicted grasp transforms, and scores into a .npy file.
+    The filename includes checkpoint information and timestamp.
+
+    Args:
+        full_pc (np.ndarray): Nx3 point cloud of the scene.
+        pred_grasps_cam (dict[int:np.ndarray]): Predicted 4x4 grasp transforms per segment or global.
+        scores (dict[int:np.ndarray]): Confidence scores for grasps.
+        output_dir (str): Directory to save the .npy file.
+        checkpoint_name (str): Name of the checkpoint/model for file naming.
+        exp_tag (str, optional): Optional experiment tag to append in file name.
+    """
+
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"grasp_predictions_{checkpoint_name}"
+    if exp_tag:
+        filename += f"_{exp_tag}"
+    filename += f"_{timestamp}.npy"
+
+    output_path = os.path.join(output_dir, filename)
+
+    # Organize data into a dictionary
+    save_data = {
+        'point_cloud': full_pc,  # Nx3
+        'contact_pts': {},  # {segment_id: [4x4 transforms]}
+        'scores': {}             # {segment_id: [scores]}
+    }
+
+    for seg_id in contact_pts:
+        save_data['contact_pts'][seg_id] = contact_pts[seg_id]
+        save_data['scores'][seg_id] = scores[seg_id]
+
+    # Save to npy file
+    np.save(output_path, save_data)
+
+    print(f"Saved grasp data to {output_path}")

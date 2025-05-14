@@ -41,14 +41,29 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
         train_dataset = AcronymDataset(global_config=global_config,debug=False, device=device, train=True)
         test_dataset  = AcronymDataset(global_config=global_config,debug=False, device=device, train=False)
         
-        wandb.init( project="contact grasp net", config={ 
-        "optimizer": global_config['SCHEDULER']['optimizer']['type'],
-        "learning_rate": global_config['SCHEDULER']['optimizer']['lr'],
-        "architecture": "cgn-ptv3backbone",
-        "dataset": "ACRONYM",
-        "batch_size": global_config['OPTIMIZER']['batch_size'],
-        "epochs": global_config['SCHEDULER']['epoch'],
-        })
+        if not FLAGS.resume:
+            # Create a run ID using checkpoint name and current date
+            checkpoint_name = os.path.basename(FLAGS.ckpt_dir)
+            current_date = datetime.now().strftime("%Y%m%d%H%M%S")
+            run_id = f"{checkpoint_name}_{current_date}"
+        else:
+            run_id = FLAGS.resume
+       
+        wandb.init( 
+            project="ContactFormer", 
+            resume="allow",
+            id=run_id,
+            config={ 
+                "optimizer": global_config['SCHEDULER']['optimizer']['type'],
+                "learning_rate": global_config['SCHEDULER']['optimizer']['lr'],
+                "architecture": FLAGS.model,
+                "dataset": "ACRONYM",
+                "batch_size": global_config['OPTIMIZER']['batch_size'],
+                "epochs": global_config['SCHEDULER']['epoch'],
+                "encoder": global_config['MODEL']['ENCODER'],
+                "decoder": global_config['MODEL']['DECODER'],
+                }
+            )
 
     else: 
         train_dataset = AcronymDataset(global_config=global_config,debug=True, device=device, train=True)
@@ -93,6 +108,7 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
         if 'val_every' in global_config['OPTIMIZER'] else 0
     max_epoch = global_config['OPTIMIZER']['max_epoch']
 
+    debug_checkpoint_every = 500
     
     # -------TRAINING LOOP--------
     
@@ -127,6 +143,9 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
                 wandb.log(loss_info, commit=False)
             pbar.set_postfix({'loss': loss.item(),
                               'epoch': epoch_it})
+            if debug_checkpoint_every and it % debug_checkpoint_every == 0:
+                checkpoint_io.save(f'model_iter_{i}.pt', epoch_it=epoch_it, it=it,
+                loss_val_best=metric_val_best)
             it += 1
             #--------VALIDATION ON TEST DATA------
         if val_every and epoch_it % val_every == 0:
@@ -152,17 +171,12 @@ def train(ContactGraspNet, global_config, log_dir, FLAGS):
                     loss_val_best=metric_val_best)
         if optimizer_type == 'adamw':   
             scheduler.step()
+        if backup_every and epoch_it % backup_every == 0:
+            checkpoint_io.save(f'model_epoch_{epoch_it}.pt', epoch_it=epoch_it, it=it,
+                loss_val_best=metric_val_best)
+            
 if __name__=="__main__":
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--overwrite_ckpt_dir', type=int, required=True, help='0, 1') # applies changes in contact_grasp_dir to files in checkpoint_dir. Attention: This will overwrite files in checkpoint_dir
-    parser.add_argument('--model', type=str, required=True, help='ptv2, ptv3')
-    parser.add_argument('--debug', type=int, default=0, help='0, 1')
-    parser.add_argument('--config_dir', type=str, default=None, help='Config dir')
-    parser.add_argument('--ckpt_dir', type=str, default=None,required=True, help='Checkpoint dir')
-
-    FLAGS = parser.parse_args()
-    checkpoint_dir = FLAGS.ckpt_dir
     if torch.cuda.is_available():
         print("CUDA is available!")
         print(f"CUDA Device Name: {torch.cuda.get_device_name(0)}")
@@ -170,19 +184,31 @@ if __name__=="__main__":
         print("Device name:", torch.cuda.get_device_name(torch.cuda.current_device()))
     else:
         print("CUDA is not available. Please check your installation.")
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--overwrite_ckpt_dir', type=int, required=True, help='0, 1') # applies changes in contact_grasp_dir to files in checkpoint_dir. Attention: This will overwrite files in checkpoint_dir
+    parser.add_argument('--model', type=str, required=True, help='ptv2, ptv3')
+    parser.add_argument('--debug', type=int, default=0, help='0, 1')
+    parser.add_argument('--config_file', type=str, default=None, help='Config dir')
+    parser.add_argument('--ckpt_dir', type=str, default=None,required=True, help='Checkpoint dir')
+    parser.add_argument('--resume', type=str, default=None, help='Provide run ID to resume training')
+    
+    
+    FLAGS = parser.parse_args()
+    checkpoint_dir = FLAGS.ckpt_dir
+    DEBUG = FLAGS.debug
     CONFIG_FILE = FLAGS.config_file or "transformer_config.yaml"
     transformer_config_path = os.path.join(CONFIG_DIR,CONFIG_FILE)
-
     model_file_path = os.path.join(CONTACT_DIR, "conatact_graspnet_model.py")
     print("overwrite_ckpt_dir", FLAGS.overwrite_ckpt_dir)
+    print("config_file", transformer_config_path)
+
     if FLAGS.overwrite_ckpt_dir: 
         config_parser.force_copy_file(source_file=transformer_config_path, target_directory=checkpoint_dir)
         config_parser.force_copy_file(source_file=model_file_path, target_directory=checkpoint_dir)
     else:
         config_parser.copy_file_if_not_exists(source_file=transformer_config_path, target_directory=checkpoint_dir)
         config_parser.copy_file_if_not_exists(source_file=model_file_path, target_directory=checkpoint_dir)
-
+    
     model_file_path = os.path.join(checkpoint_dir, 'conatact_graspnet_model.py')
     if os.path.exists(model_file_path):
         spec = importlib.util.spec_from_file_location("checkpoiont_model", model_file_path)
@@ -195,7 +221,6 @@ if __name__=="__main__":
         elif FLAGS.model == 'ptv3':
             ContactGraspNet = conatact_graspnet_model.ContactGraspNetPtV3
             print("Using ContactGraspNetPtV3")
-    # global_config = config_parser.load_config(FLAGS.config_dir)
     global_config = config_parser.load_config(config_path=os.path.join(checkpoint_dir, CONFIG_FILE))
     
     train(ContactGraspNet, global_config, checkpoint_dir, FLAGS)

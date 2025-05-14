@@ -337,7 +337,9 @@ class ContactGraspNetPtV2(nn.Module):
             pred_scores=pred_scores,
             pred_points=pred_points,
             offset_pred=offset_pred,
-            grasp_offset_head=grasp_offset_head # For loss
+            grasp_offset_head=grasp_offset_head, # For loss
+            approach_dir= approach_dir_head_orthog,
+            base_dir = grasp_dir_head_normed
         )
         assert pred["pred_grasps_cam"].shape == torch.Size([batch_size, num_points, 4, 4]), \
                 f"Expected pred_grasps_cam to have shape ({batch_size}, {num_points}, 4, 4), but got {pred['pred_grasps_cam'].shape}"
@@ -350,6 +352,12 @@ class ContactGraspNetPtV2(nn.Module):
 
         assert pred["grasp_offset_head"].shape == torch.Size([batch_size, 10, num_points]), \
             f"Expected grasp_offset_head to have shape ({batch_size}, 10, {num_points}), but got {pred['grasp_offset_head'].shape}"
+        
+        assert pred["approach_dir"].shape == torch.Size([batch_size, 3, num_points]), \
+            f"Expected approach_dir to have shape ({batch_size}, 3 {num_points}), but got {pred['approach_dir'].shape}"
+        
+        assert pred["base_dir"].shape == torch.Size([batch_size, 3, num_points]), \
+            f"Expected base_dir to have shape ({batch_size}, 3 {num_points}), but got {pred['base_dir'].shape}"
         # return pred_grasps_cam, pred_scores, pred_points, offset_pred, intermediates
         return pred
 

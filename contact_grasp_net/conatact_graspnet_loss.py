@@ -23,6 +23,8 @@ class ContacGraspNetLoss(nn.Module):
             'pred_grasps_adds',  # True
             'pred_grasps_adds_gt2pred',
             'pred_grasps_support_surface', # True
+            'pred_grasps_approach', 
+            'pred_grasps_contact_approach'
 
         ]
         config_weights = [
@@ -32,13 +34,18 @@ class ContacGraspNetLoss(nn.Module):
             'approach_cosine_loss_weight',
             'adds_loss_weight',  # True
             'adds_gt2pred_loss_weight',
-            'support_surface_loss_weight' # True
-
+            'support_surface_loss_weight', # True
+            'approach_loss_weight',
+            'approach_contact_loss_weight'
 
         ]
         alpha=self.global_config['OPTIMIZER']['support_surface_loss_alpha']
         beta=self.global_config['OPTIMIZER']['support_surface_loss_beta']
         print(f"===> support surface loss alpha: {alpha:.4f}, beta: {beta:.4f}")
+        self.alpha_approach=self.global_config['OPTIMIZER']['approach_loss_alpha']
+        self.beta_approach=self.global_config['OPTIMIZER']['approach_loss_beta']
+        self.gamma_contact_approach=self.global_config['OPTIMIZER']['approach_contact_loss_gamma']
+        print(f"===> approach loss alpha: {self.alpha_approach:.4f}, beta: {self.beta_approach:.4f}, beta: {self.gamma_contact_approach:.4f}")
         for config_loss, config_weight in zip(config_losses, config_weights):
             if global_config['MODEL'][config_loss]:
                 setattr(self, config_weight, global_config['OPTIMIZER'][config_weight])
@@ -91,7 +98,8 @@ class ContacGraspNetLoss(nn.Module):
         pred_points = prediction['pred_points']                                    # B x N x 3
         pred_scores = prediction['pred_scores']                                    # B x N x 1
         grasp_offset_head = prediction['grasp_offset_head'].permute(0, 2, 1)       # B x N x 10
-
+        pred_approach_vectos = prediction['approach_dir'].permute(0,2,1)  # B x N x 3
+        pred_base_vectors = prediction['base_dir'].permute(0,2,1)  # B x N x 3
         dir_labels_pc_cam, \
         grasp_offset_labels_pc, \
         grasp_success_labels_pc, \
@@ -233,17 +241,33 @@ class ContacGraspNetLoss(nn.Module):
             support_surface_loss = self._support_surface_loss(pred_points[:, :, :3], pred_scores,
                                                               plane_equations,
                                                                 alpha=self.global_config['OPTIMIZER']['support_surface_loss_alpha'],
-                                                                beta=self.global_config['OPTIMIZER']['support_surface_loss_beta'])  # B x 1
+                                                                beta=self.global_config['OPTIMIZER']['support_surface_loss_beta'],
+                                                                topk_confidence=self.global_config['LOSS']['topk_confidence'])  # B x 1
                                                             
             total_loss += self.support_surface_loss_weight * support_surface_loss
+        
+        
+        if self.approach_loss_weight > 0:
+            plane_equations = self._batch_plane_ransac(pc_cam[:, :, :3])  # B x 4
+
+            approach_loss = self._approach_loss(pred_points, pred_scores, plane_equations, 
+                                                pred_approach_vectos, contact_directions=pred_base_vectors,
+                                                alpha=self.alpha_approach,beta=self.beta_approach, gamma=self.gamma_contact_approach)  # B x 1
+
+            total_loss += self.approach_loss_weight * approach_loss
+
+
         loss_info = {
             'bin_ce_loss': bin_ce_loss,   # Grasp success loss
-            'offset_loss': offset_loss,   # Grasp width loss
-            'adds_loss': adds_loss        # Pose loss
         }
-
+        if self.adds_gt2pred_loss_weight > 0:
+            loss_info['adds_loss_weight'] = adds_loss # Pose loss
+        if self.offset_loss_weight > 0:
+            loss_info['offset_loss'] = offset_loss # Grasp width loss
         if self.support_surface_loss_weight > 0:
             loss_info['support_surface_loss'] = support_surface_loss 
+        if self.approach_loss_weight > 0:
+            loss_info['approach_loss'] = approach_loss
 
         return total_loss, loss_info
     def _project_to_image_plane(self, points_3d):
@@ -413,7 +437,7 @@ class ContacGraspNetLoss(nn.Module):
             # Fit a plane to the points using RANSAC
             result = plane_fit(
                 pts=points,
-                thresh=0.01,
+                thresh=0.005,
                 max_iterations=1000,
                 iterations_per_batch=100,
                 epsilon=1e-8,
@@ -433,7 +457,8 @@ class ContacGraspNetLoss(nn.Module):
                           pred_scores: torch.Tensor,
                           plane_equation: torch.Tensor,
                           alpha: float = 1.0,
-                          beta: float = 10.0) -> torch.Tensor:
+                          beta: float = 10.0,
+                          topk_confidence: int= 512) -> torch.Tensor:
         """
         Compute a normalized exponential distance loss from contact points to a plane.
     
@@ -459,17 +484,67 @@ class ContacGraspNetLoss(nn.Module):
     
         # Apply exponential penalty: alpha * exp(beta * distance)
         penalized = pred_scores.squeeze(-1) *alpha * torch.exp(-1*beta * distances)  # (B, N)
-    
-        # Normalize the total penalty per batch (max normalized value = 1)
-        max_penalty = torch.max(penalized, dim=1, keepdim=True)[0] * penalized.shape[1] + 1e-8  # (B, 1)
-        normalized_loss_per_batch = torch.sum(penalized, dim=1) / max_penalty.squeeze(1)  # (B,)
-    
-        # Final scalar loss across the batch
-        normalized_mean_loss = normalized_loss_per_batch.mean()  # scalar
-    
-        return normalized_mean_loss
 
+        if topk_confidence is not None and topk_confidence > 0:
+            # Select top-k highest penalties per batch sample
+            topk_penalties, _ = torch.topk(penalized, k=topk_confidence, dim=1)  # (B, k)
+            mean_loss = topk_penalties.mean()  # scalar
+        else:
+            mean_loss = penalized.mean()  # fallback to normal mean loss
 
+        # mean_loss = penalized.squeeze(1)  # scalar
+        # mean_loss = mean_loss.mean()  # scalar
+
+        return mean_loss #normalized_mean_loss
+
+    def _approach_loss(self,
+                   pred_points: torch.Tensor,
+                   pred_scores: torch.Tensor,
+                   plane_equation: torch.Tensor,
+                   approach_vectors: torch.Tensor,
+                   contact_directions: torch.Tensor = None,
+                   alpha=10.0,
+                   beta=5.0,
+                   gamma=1.0,
+                   save_debug=False,
+                   debug_path="/home/raphael/thesis/contact_former/contact_grasp_net/debug_ss_loss.pt"):
+        """
+        Penalizes grasp directions that are tangential or directed into the support surface.
+        Optionally saves input arguments to a .pt debug file.
+        """
+
+        # === Debug Save Block ===
+        if save_debug and debug_path:
+            debug_data = {
+                'pred_points': pred_points.detach().cpu(),
+                'plane_equation': plane_equation.detach().cpu(),
+                'approach_vectors': approach_vectors.detach().cpu(),
+                'contact_directions': contact_directions.detach().cpu() if contact_directions is not None else None,
+                'alpha': alpha,
+                'beta': beta,
+                'gamma': gamma
+            }
+            torch.save(debug_data, debug_path)
+            print(f"Debug data saved to {debug_path}")
+
+        # === Normal Loss Computation ===
+        normal = plane_equation[:, :3].to(self.device)
+        normal = normal / (torch.norm(normal, dim=1, keepdim=True) + 1e-8)
+
+        dot_prods = torch.einsum('bnd,bd->bn', approach_vectors, normal)
+
+        tangential_penalty = pred_scores.squeeze(-1) *torch.exp(-beta * dot_prods**2)
+        into_surface_penalty = pred_scores.squeeze(-1) *torch.relu(dot_prods)
+
+        contact_loss = 1
+        if False:  # Contact direction penalty can be switched on later
+            dot_contact = torch.einsum('bnd,bd->bn', contact_directions, normal)
+            contact_penalty = dot_contact**2
+            contact_loss = contact_penalty.mean()
+
+        total_loss = contact_loss * tangential_penalty.mean() #+ alpha * into_surface_penalty.mean()
+
+        return total_loss
 
     def _get_bin_vals(self):
         """
