@@ -21,6 +21,8 @@ from thesis_experiments.train_eval.train_eval import train_eval, virtual_train_e
 import contact_grasp_net.config_parser
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
+from torch.optim.lr_scheduler import LambdaLR
+
 from torch.utils.data.dataloader import DataLoader, RandomSampler
 from contact_grasp_net.acronym_dataset import AcronymDataset
 import importlib.util
@@ -37,6 +39,33 @@ import wandb
 from pathlib import Path
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
+def get_learning_rate_scheduler(optimizer, optimizer_config):
+    """
+    Returns a learning rate scheduler equivalent to tf.train.exponential_decay with staircase=True.
+
+    Args:
+        optimizer: PyTorch optimizer instance.
+        optimizer_config (dict): optimizer configuration dictionary with keys:
+            - 'batch_size'
+            - 'learning_rate'
+            - 'decay_step'
+            - 'decay_rate'
+
+    Returns:
+        scheduler (LambdaLR): PyTorch LR scheduler.
+    """
+
+    base_learning_rate = optimizer_config['learning_rate']
+    decay_step = float(optimizer_config['decay_step'])
+    decay_rate = float(optimizer_config['decay_rate'])
+
+    # Lambda function to mimic TensorFlow's staircase exponential decay
+    def lr_lambda(epoch):
+        exp = int(epoch * optimizer_config['batch_size'] / decay_step)
+        return max(decay_rate ** exp, 0.00001 / base_learning_rate)
+
+    scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+    return scheduler
 
 def train(ContactGraspNet, global_config, log_dir, DEBUG):
     
@@ -60,6 +89,7 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
     if optimizer_type== 'adam':
         print("Using Adam optimizer")
         optimizer = torch.optim.Adam(grasp_net.parameters(),lr=global_config['OPTIMIZER']['learning_rate'])
+        scheduler = get_learning_rate_scheduler(optimizer, global_config['OPTIMIZER'])
 
     elif optimizer_type == 'adamw':
         print("Using AdamW optimizer")
@@ -91,12 +121,13 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
     robot_val_every = global_config['OPTIMIZER'].get('robot_val_every', 0)
     max_epoch = global_config['OPTIMIZER']['max_epoch']
 
-    
     # -------TRAINING LOOP--------
-    
+    total_it = 0
+    scheduler.step(cur_epoch)
     for epoch_it in range(cur_epoch, max_epoch):
         grasp_net.train()
         pbar = tqdm.tqdm(train_loader)
+        
         for i, data in enumerate(pbar):
             utils.send_dict_to_device(data, device)
             pc_cam = data['pc_cam']
@@ -118,16 +149,17 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
             for k, v in loss_info.items():
                 logger.add_scalar(f'train/{k}', v, it)
             logger.add_scalar('train/loss', loss.item(), it)
-
+  
             if not DEBUG:
-                if checkpoint_every and it % checkpoint_every == 0:
-                    checkpoint_io.save('model.pt', epoch_it=epoch_it, it=it,
-                    loss_val_best=metric_val_best)   
+                # if backup_every and total_it % backup_every == 0:
+                #     checkpoint_io.save(f'model_it_{total_it}.pt', epoch_it=epoch_it, it=it,
+                #     loss_val_best=metric_val_best)   
                 wandb.log({"loss": loss.item()})
                 wandb.log(loss_info, commit=False)
             pbar.set_postfix({'loss': loss.item(),
                               'epoch': epoch_it})
             it += 1
+            total_it += 1
             #--------VALIDATION ON TEST DATA------
         if val_every and epoch_it % val_every == 0:
             print("Running validation...")
@@ -153,17 +185,18 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
         
         if optimizer_type == 'adamw':   
             scheduler.step()
-
+        else:
+            scheduler.step(cur_epoch)
         if robot_val_every and epoch_it % robot_val_every == 0:
             print("Running robot validation...")
             epoch_it = epoch_it + 1
             checkpoint_io.save('model.pt', epoch_it=epoch_it, it=it, loss_val_best=metric_val_best)
             return epoch_it, checkpoint_io, it, metric_val_best
         
-        if backup_every and epoch_it % backup_every == 0:
+        if checkpoint_every and epoch_it % checkpoint_every == 0:
             checkpoint_io.save(f'model_epoch_{epoch_it}.pt', epoch_it=epoch_it, it=it,
                 loss_val_best=metric_val_best)
-
+        
 def evaluate_model(best_ckpt_path, epoch_it,config_file,name=None):
     # 
     queue = mp.Queue()

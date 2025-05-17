@@ -152,13 +152,13 @@ MODEL:
   pe_multiplier: false
   pred_contact_approach: false
   pred_contact_base: false
-  pred_contact_offset: true
+  pred_contact_offset: false
   pred_contact_success: true
-  pred_grasps_adds: true
+  pred_grasps_adds: false
   pred_grasps_adds_gt2pred: false
-  pred_grasps_support_surface: true
-  pred_grasps_approach: false
-  pred_grasps_contact_approach: false
+  pred_grasps_support_surface: false
+  pred_grasps_approach: true
+  pred_grasps_contact_approach: true
   set_abstraction: true
   type: PT-v2
   unpool_backend: map
@@ -187,15 +187,15 @@ OPTIMIZER:
   val_every: 1
   robot_val_every: 5
   support_surface_loss_weight: 1
-  support_surface_loss_alpha: 5
-  support_surface_loss_beta: 50
-  approach_loss_weight: 1
+  support_surface_loss_alpha: 10
+  support_surface_loss_beta: 100
+  approach_loss_weight: 10
   approach_loss_alpha: 10
   approach_loss_beta: 5
   approach_contact_loss_weight: 1
   approach_contact_loss_gamma: 10
 SCHEDULER:
-  epoch: 50
+  epoch: 100
   eval_epoch: 50
   optimizer:
     lr: 0.002

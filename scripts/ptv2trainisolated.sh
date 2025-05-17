@@ -5,7 +5,7 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID
 
 export CUDA_VISIBLE_DEVICES=6
 # Define the checkpoint directory
-CKPT_DIR="checkpoints/ptv2-revised-checkpoint-collect"
+CKPT_DIR="checkpoints/ptv2-revised-isolated"
 OVERWRITE_CKPT_DIR=1
 MODEL="ptv2"
 which python
@@ -14,5 +14,4 @@ taskset -c 0,1,2,3,4,5,6,7,8,9 python /home/raphael/thesis/contact_former/contac
     --ckpt_dir "$CKPT_DIR" \
     --overwrite_ckpt_dir "$OVERWRITE_CKPT_DIR" \
     --model "$MODEL"\
-    --config_file "transformer_config.yaml" \
-    --resume ptv2-final_20250516201805
+    --config_file "transformer_config_isolated.yaml" 

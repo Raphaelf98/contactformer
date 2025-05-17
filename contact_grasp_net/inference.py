@@ -117,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument('--load_model', type=str, default=None, help='Name of checkpoint to be loaded')
     parser.add_argument('--dump_dir', type=str, default='/home/raphael/thesis/contact_former/analysis/results/ContactFormer', help='grasps will be saved here')
     # parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/test_data/8.npy', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
-    parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/acronym_scenes/005251/189.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
+    parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/acronym_scenes/005251/007.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
     # parser.add_argument('--np_path', default='/home/ssdArray/datasets/grasp_planning_datasets/acronym/acronym/renders/000001/000.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
 
     parser.add_argument('--K', default=None, help='Flat Camera Matrix, pass as "[fx, 0, cx, 0, fy, cy, 0, 0 ,1]"')

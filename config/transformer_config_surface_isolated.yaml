@@ -188,7 +188,7 @@ OPTIMIZER:
   robot_val_every: 5
   support_surface_loss_weight: 1
   support_surface_loss_alpha: 1
-  support_surface_loss_beta: 2
+  support_surface_loss_beta: 20
   approach_loss_weight: 1
   approach_loss_alpha: 10
   approach_loss_beta: 5

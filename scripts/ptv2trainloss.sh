@@ -5,7 +5,7 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID
 
 export CUDA_VISIBLE_DEVICES=6
 # Define the checkpoint directory
-CKPT_DIR="checkpoints/ptv2-revised-loss-1-2"
+CKPT_DIR="checkpoints/ptv2-debug"
 OVERWRITE_CKPT_DIR=1
 MODEL="ptv2"
 which python

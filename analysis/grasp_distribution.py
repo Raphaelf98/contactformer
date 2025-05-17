@@ -122,5 +122,5 @@ def plot_contact_point_score_distribution(npy_file, distance_thresh=0.01, device
 # Example usage:
 # file = 'grasp_predictions_ptv2-revised-robo-eval-loss-1_20250513_100529.npy' # early checkpint
 # file = 'grasp_predictions_ptv2-revised-robo-eval_20250513_102322.npy' # fininshed checkpoint
-file = 'results/ContactFormer/grasp_predictions_ptv2-revised-loss-1-10_20250514_132305.npy'
+file = 'results/ContactFormer/grasp_predictions_ptv2-revised-loss-no-norm_20250514_212140.npy'
 plot_contact_point_score_distribution(file, distance_thresh=0.01, device='cpu')

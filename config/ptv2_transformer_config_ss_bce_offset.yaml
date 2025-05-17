@@ -180,15 +180,15 @@ OPTIMIZER:
   learning_rate: 0.001
   max_epoch: 200
   momentum: 0.9
-  offset_loss_weight: 1
+  offset_loss_weight: 10
   optimizer: adam
   print_every: 10
-  score_ce_loss_weight: 1
+  score_ce_loss_weight: 2
   val_every: 1
   robot_val_every: 5
   support_surface_loss_weight: 1
-  support_surface_loss_alpha: 5
-  support_surface_loss_beta: 50
+  support_surface_loss_alpha: 1
+  support_surface_loss_beta: 100
   approach_loss_weight: 1
   approach_loss_alpha: 10
   approach_loss_beta: 5
