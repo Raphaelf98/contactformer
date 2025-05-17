@@ -27,7 +27,7 @@ from torch.utils.data.dataloader import DataLoader, RandomSampler
 from contact_grasp_net.acronym_dataset import AcronymDataset
 import importlib.util
 from pyvirtualdisplay import Display
-
+import logging 
 import multiprocessing as mp
 
 
@@ -39,6 +39,33 @@ import wandb
 from pathlib import Path
 
 os.environ["PYOPENGL_PLATFORM"] = "egl"
+
+class StreamToLogger:
+    def __init__(self, logger, level):
+        self.logger = logger
+        self.level = level
+
+    def write(self, message):
+        message = message.rstrip()
+        if message:
+            self.logger.log(self.level, message)
+
+    def flush(self):
+        pass
+
+def setup_logger(log_file):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s]: %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
+    sys.stdout = StreamToLogger(logging.getLogger(), logging.INFO)
+    sys.stderr = StreamToLogger(logging.getLogger(), logging.ERROR)
+
 def get_learning_rate_scheduler(optimizer, optimizer_config):
     """
     Returns a learning rate scheduler equivalent to tf.train.exponential_decay with staircase=True.
@@ -97,6 +124,11 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
         scheduler = lr_scheduler.OneCycleLR(optimizer,max_lr=0.9,total_steps=global_config['SCHEDULER']['epoch'] * len(train_loader))
        
     logger = SummaryWriter(os.path.join(log_dir, 'logs'))
+
+    timestamp = datetime.now().strftime("%d%m%Y_%H%M")
+    log_file = os.path.join(log_dir, f"train_robo_eval_{timestamp}.log")
+    setup_logger(log_file)
+
     checkpoint_dir = os.path.join(log_dir, 'checkpoints')
     checkpoint_io = CheckpointIO(checkpoint_dir, model=grasp_net, opt=optimizer)
 
@@ -132,9 +164,8 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
             utils.send_dict_to_device(data, device)
             pc_cam = data['pc_cam']
             prediction = grasp_net(pc_cam)
-            # for key, value in prediction.items():
-            #     print(f"{key}: {value.shape}")
-            loss, loss_info = loss_fcn(prediction, data)
+          
+            loss, loss_info = loss_fcn(prediction, data, epoch_it)
             #Resets gradients of all model parameters to zero, 
             # gradients accumulate by default in Pytorch during backprop, 
             # clearing ensures update is only on current batch
@@ -186,7 +217,9 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
         if optimizer_type == 'adamw':   
             scheduler.step()
         else:
-            scheduler.step(cur_epoch)
+            scheduler.step(cur_epoch+1)
+        if not DEBUG:  
+            wandb.log({"learning_rate": scheduler.get_last_lr()[0]})
         if robot_val_every and epoch_it % robot_val_every == 0:
             print("Running robot validation...")
             epoch_it = epoch_it + 1
@@ -203,13 +236,13 @@ def evaluate_model(best_ckpt_path, epoch_it,config_file,name=None):
     p = mp.Process(target=eval_worker, args=(epoch_it, best_ckpt_path,config_file, queue, name))
     p.start()
     p.join()
-    grasp_success, object_grasp_ratio = queue.get()
-    return  grasp_success, object_grasp_ratio
+    grasp_success, object_grasp_ratio, avg_num_grasps = queue.get()
+    return  grasp_success, object_grasp_ratio, avg_num_grasps
 
 def eval_worker(epoch_it, ckpt_path, config_file,  queue, name=None):
-    grasp_success, object_grasp_ratio = virtual_train_eval('ContactFormer', ckpt_path, epoch=epoch_it, CONFIG_FILE=config_file, NAME=name)
+    grasp_success, object_grasp_ratio, avg_num_grasps = virtual_train_eval('ContactFormer', ckpt_path, epoch=epoch_it, CONFIG_FILE=config_file, NAME=name)
    
-    queue.put((grasp_success, object_grasp_ratio))
+    queue.put((grasp_success, object_grasp_ratio, avg_num_grasps))
 
     
 if __name__=="__main__":
@@ -306,7 +339,7 @@ if __name__=="__main__":
         ckpt_path = os.path.join(CONTACT_FORMER_DIR, FLAGS.ckpt_dir)
                 
 
-        grasp_success, object_grasp_ratio = evaluate_model(ckpt_path, epoch_it, CONFIG_FILE, FLAGS.model)
+        grasp_success, object_grasp_ratio, avg_num_grasps = evaluate_model(ckpt_path, epoch_it, CONFIG_FILE, FLAGS.model)
         if grasp_success > current_best_grasp_success:
             current_best_grasp_success = grasp_success
             print("Best grasp success so far:", current_best_grasp_success)
@@ -315,7 +348,8 @@ if __name__=="__main__":
         if not DEBUG:
             wandb.log({
                 'grasp_success': grasp_success,
-                'object_grasp_ratio': object_grasp_ratio
+                'object_grasp_ratio': object_grasp_ratio,
+                'avg_num_grasps': avg_num_grasps,
             })
                 
     disp.stop()

@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from contact_grasp_net.mesh_utils import create_gripper
 from contact_grasp_net.utils import *
 from torch_ransac3d.plane import plane_fit
@@ -13,7 +14,7 @@ class ContacGraspNetLoss(nn.Module):
         super(ContacGraspNetLoss,self).__init__()
         self.global_config = global_config
         self.device = device 
-
+        
         # --Process config--
         config_losses = [
             'pred_contact_base',
@@ -68,7 +69,7 @@ class ContacGraspNetLoss(nn.Module):
         self.gripper_control_points_homog = self.gripper_control_points_homog.to(self.device)
         self.sym_gripper_control_points_homog = self.sym_gripper_control_points_homog.to(self.device)
 
-    def forward(self, prediction, target):
+    def forward(self, prediction, target, epoch=0):
         """
         Computes loss terms from pointclouds, network predictions and labels.
         Note: computation happens batch-wise
@@ -122,6 +123,8 @@ class ContacGraspNetLoss(nn.Module):
 
         # -- Grasp Confidence Loss -- #
         if self.score_ce_loss_weight > 0:  # TODO (bin_ce_loss)
+            print("pred_scores min:", pred_scores.min().item(), "max:", pred_scores.max().item())
+            assert torch.all((pred_scores >= 0) & (pred_scores <= 1)), "pred_scores out of bounds"
             bin_ce_loss = F.binary_cross_entropy(pred_scores, grasp_success_labels_pc, reduction='none')  # F.binary_cross_entropy_with_logits(pred_scores, grasp_success_labels_pc) # # B x N x 1
             if 'topk_confidence' in self.global_config['LOSS'] \
                 and self.global_config['LOSS']['topk_confidence']:
@@ -243,8 +246,15 @@ class ContacGraspNetLoss(nn.Module):
                                                                 alpha=self.global_config['OPTIMIZER']['support_surface_loss_alpha'],
                                                                 beta=self.global_config['OPTIMIZER']['support_surface_loss_beta'],
                                                                 topk_confidence=self.global_config['LOSS']['topk_confidence'])  # B x 1
-                                                            
-            total_loss += self.support_surface_loss_weight * support_surface_loss
+            if self.global_config['OPTIMIZER']['support_surface_decay']:
+                target_weight = self.global_config['OPTIMIZER']['support_surface_decay_target']
+                max_epochs = self.global_config['OPTIMIZER']['max_epoch']
+                support_surface_loss_weight = self.support_surface_loss_weight - epoch * (self.support_surface_loss_weight - target_weight) / max_epochs
+            else:
+                support_surface_loss_weight = self.support_surface_loss_weight 
+            assert not torch.isnan(support_surface_loss), "NaN in support_surface_loss"
+            assert not torch.isinf(support_surface_loss), "Inf in support_surface_loss"
+            total_loss += support_surface_loss_weight * support_surface_loss
         
         
         # if self.approach_loss_weight > 0:
@@ -267,6 +277,8 @@ class ContacGraspNetLoss(nn.Module):
             loss_info['offset_loss'] = offset_loss # Grasp width loss
         if self.support_surface_loss_weight > 0:
             loss_info['support_surface_loss'] = support_surface_loss 
+            if self.global_config['OPTIMIZER']['support_surface_decay']:
+                loss_info['support_surface_loss_weight'] = support_surface_loss_weight
         # if self.approach_loss_weight > 0:
         #     loss_info['approach_loss'] = approach_loss
 
@@ -438,7 +450,7 @@ class ContacGraspNetLoss(nn.Module):
             # Fit a plane to the points using RANSAC
             result = plane_fit(
                 pts=points,
-                thresh=0.005,
+                thresh=0.001,
                 max_iterations=1000,
                 iterations_per_batch=100,
                 epsilon=1e-8,
@@ -453,49 +465,119 @@ class ContacGraspNetLoss(nn.Module):
 
         return torch.stack(plane_eqs, dim=0).to(self.device) # return B x 4 tensor with plane equations
     
+    # def _support_surface_loss(self,
+    #                       contact_points: torch.Tensor,
+    #                       pred_scores: torch.Tensor,
+    #                       plane_equation: torch.Tensor,
+    #                       alpha: float = 1.0,
+    #                       beta: float = 10.0,
+    #                       topk_confidence: int= 512) -> torch.Tensor:
+    #     """
+    #     Compute a normalized exponential distance loss from contact points to a plane.
+    
+    #     Args:
+    #         contact_points (torch.Tensor): shape (B, N, 3) — batch of contact points.
+    #         plane_equation (torch.Tensor): shape (B, 4) — [a, b, c, d] for each batch.
+    #         alpha (float): scaling factor for exponential penalty.
+    #         beta (float): growth rate for exponential penalty.
+    
+    #     Returns:
+    #         torch.Tensor: scalar normalized mean loss across batch.
+    #     """
+    #     # Extract normal vectors and offset (d)
+    #     normal = plane_equation[:, :3].to(self.device)      # (B, 3)
+    #     d = plane_equation[:, 3:].to(self.device)           # (B, 1)
+    #     normal_norm = torch.norm(normal, dim=1, keepdim=True) + 1e-8  # (B, 1)
+    
+    #     # Compute dot product between normals and contact points: (B, N)
+    #     dot = torch.einsum('bnd,bd->bn', contact_points, normal)# + d  # (B, N)
+    
+    #     # Compute distances
+    #     distances = dot / normal_norm  # (B, N)
+    
+    #     # Apply exponential penalty: alpha * exp(beta * distance)
+    #     penalized = alpha * torch.exp(-1*beta * distances)  # (B, N)
+    #     penalized = pred_scores.squeeze(-1) *torch.log1p(penalized)
+    #     penalized = torch.clamp(penalized, max=100.0)
+
+    #     if topk_confidence is not None and topk_confidence > 0:
+    #         # Select top-k highest penalties per batch sample
+    #         topk_penalties, _ = torch.topk(penalized, k=topk_confidence, dim=1)  # (B, k)
+    #         mean_loss = topk_penalties.mean()  # scalar
+    #         # mean_loss = topk_penalties.sum() / contact_points.shape[0]
+    #     else:
+    #         mean_loss = penalized.mean() 
+
+    #     return mean_loss #normalized_mean_loss
     def _support_surface_loss(self,
-                          contact_points: torch.Tensor,
-                          pred_scores: torch.Tensor,
-                          plane_equation: torch.Tensor,
-                          alpha: float = 1.0,
-                          beta: float = 10.0,
-                          topk_confidence: int= 512) -> torch.Tensor:
+                            contact_points: torch.Tensor,
+                            pred_scores: torch.Tensor,
+                            plane_equation: torch.Tensor,
+                            alpha: float = 1.0,
+                            beta: float = 10.0,
+                            topk_confidence: int = 512) -> torch.Tensor:
         """
         Compute a normalized exponential distance loss from contact points to a plane.
-    
-        Args:
-            contact_points (torch.Tensor): shape (B, N, 3) — batch of contact points.
-            plane_equation (torch.Tensor): shape (B, 4) — [a, b, c, d] for each batch.
-            alpha (float): scaling factor for exponential penalty.
-            beta (float): growth rate for exponential penalty.
-    
-        Returns:
-            torch.Tensor: scalar normalized mean loss across batch.
         """
         # Extract normal vectors and offset (d)
         normal = plane_equation[:, :3].to(self.device)      # (B, 3)
         d = plane_equation[:, 3:].to(self.device)           # (B, 1)
         normal_norm = torch.norm(normal, dim=1, keepdim=True) + 1e-8  # (B, 1)
-    
+        # Flip normals to point *toward* the camera at origin (0, 0, 0)
+        # Compute dot product between contact points and normal vectors
+        camera_z = torch.tensor([0.0, 0.0, 1.0], device=self.device).expand_as(normal)
+        dot = (normal * camera_z).sum(dim=1)  # (B,)
+        flip_mask = dot < 0
+        normal[flip_mask] = -normal[flip_mask]
+
+        # Print updated normals
+        # print("Flipped normals (after flip):", normal)
+        # print(f"[support_surface_loss] normal min: {normal.min().item()}, max: {normal.max().item()}")
+        # print(f"[support_surface_loss] d min: {d.min().item()}, max: {d.max().item()}")
+        # print(f"[support_surface_loss] normal_norm min: {normal_norm.min().item()}, max: {normal_norm.max().item()}")
+
         # Compute dot product between normals and contact points: (B, N)
-        dot = torch.einsum('bnd,bd->bn', contact_points, normal)# + d  # (B, N)
-    
+        dot = torch.einsum('bnd,bd->bn', contact_points, normal) + d # (B, N)
+        # print(f"[support_surface_loss] dot min: {dot.min().item()}, max: {dot.max().item()}")
+
         # Compute distances
         distances = dot / normal_norm  # (B, N)
-    
-        # Apply exponential penalty: alpha * exp(beta * distance)
-        penalized = alpha * torch.exp(-1*beta * distances)  # (B, N)
-        penalized = pred_scores.squeeze(-1) *torch.log1p(penalized)
-        penalized = torch.clamp(penalized, max=100.0)
-        if topk_confidence is not None and topk_confidence > 0:
-            # Select top-k highest penalties per batch sample
-            topk_penalties, _ = torch.topk(penalized, k=topk_confidence, dim=1)  # (B, k)
-            mean_loss = topk_penalties.mean()  # scalar
-            # mean_loss = topk_penalties.sum() / contact_points.shape[0]
-        else:
-            mean_loss = penalized.mean()  
-        return mean_loss #normalized_mean_loss
+        # print(f"[support_surface_loss] distances min: {distances.min().item()}, max: {distances.max().item()}")
+        # print(f"[support_surface_loss] distances nan: {torch.isnan(distances).any().item()}, inf: {torch.isinf(distances).any().item()}")
 
+        # Apply exponential penalty: alpha * exp(beta * distance)
+        softplus = nn.Softplus()  
+        distances = torch.clamp(distances, min=-0.02)
+        penalized = pred_scores.squeeze(-1) * alpha* softplus( -beta * distances)  # (B, N)
+        # print(f"[support_surface_loss] penalized (exp) min: {penalized.min().item()}, max: {penalized.max().item()}")
+        # print(f"[support_surface_loss] penalized (exp) nan: {torch.isnan(penalized).any().item()}, inf: {torch.isinf(penalized).any().item()}")
+        # print(f"[support_surface_loss] penalized (after log1p*score) min: {penalized.min().item()}, max: {penalized.max().item()}")
+        # print(f"[support_surface_loss] penalized (after log1p*score) nan: {torch.isnan(penalized).any().item()}, inf: {torch.isinf(penalized).any().item()}")
+
+        if torch.isnan(penalized).any() or torch.isinf(penalized).any():
+            print("[!] Detected nan or inf in penalized tensor — visualizing...")
+            self.export_plane_and_contacts(contact_points, torch.cat([normal, d], dim=1), batch_idx=0)
+            self.export_plane_and_contacts(contact_points, torch.cat([normal, d], dim=1), batch_idx=1)
+            self.export_plane_and_contacts(contact_points, torch.cat([normal, d], dim=1), batch_idx=2)
+            self.export_plane_and_contacts(contact_points, torch.cat([normal, d], dim=1), batch_idx=3)
+            self.export_plane_and_contacts(contact_points, torch.cat([normal, d], dim=1), batch_idx=4)
+            self.export_plane_and_contacts(contact_points, torch.cat([normal, d], dim=1), batch_idx=5)
+
+        # Optionally clamp
+        # penalized = torch.clamp(penalized, max=100.0)
+
+        if topk_confidence is not None and topk_confidence > 0:
+            topk_penalties, _ = torch.topk(penalized, k=topk_confidence, dim=1)
+            # print(f"[support_surface_loss] topk_penalties min: {topk_penalties.min().item()}, max: {topk_penalties.max().item()}")
+            # print(f"[support_surface_loss] topk_penalties nan: {torch.isnan(topk_penalties).any().item()}, inf: {torch.isinf(topk_penalties).any().item()}")
+            mean_loss = topk_penalties.mean()
+        else:
+            mean_loss = penalized.mean()
+
+        print(f"[support_surface_loss] mean_loss: {mean_loss.item()}")
+        print(f"[support_surface_loss] mean_loss nan: {torch.isnan(mean_loss).item()}, inf: {torch.isinf(mean_loss).item()}")
+
+        return mean_loss
     def _approach_loss(self,
                    pred_points: torch.Tensor,
                    pred_scores: torch.Tensor,
@@ -576,7 +658,81 @@ class ContacGraspNetLoss(nn.Module):
 
         bin_vals = torch.tensor(bin_vals, dtype=torch.float32)
         return bin_vals
-    
+    def export_plane_and_contacts(self,
+                               contact_points: torch.Tensor,
+                               plane_equation: torch.Tensor,
+                               batch_idx: int = 0,
+                               export_dir: str = "./debug_vis",
+                               file_prefix: str = "support_surface",
+                               num_points: int = 512):
+        """
+        Save the contact points, support plane, and the normal vector as .ply files for offline inspection.
+        """
+        os.makedirs(export_dir, exist_ok=True)
+        import open3d as o3d
+        cp = contact_points[batch_idx].detach().cpu().numpy()
+        eq = plane_equation[batch_idx].detach().cpu().numpy()
+        a, b, c, d = eq
+        normal = np.array([a, b, c])
+        normal = normal / (np.linalg.norm(normal) + 1e-8)
+
+        # Sample contact points
+        if cp.shape[0] > num_points:
+            idx = np.random.choice(cp.shape[0], num_points, replace=False)
+            cp = cp[idx]
+
+        # Save contact points
+        pc_o3d = o3d.geometry.PointCloud()
+        pc_o3d.points = o3d.utility.Vector3dVector(cp)
+        pc_o3d.paint_uniform_color([0.1, 0.6, 0.9])
+        o3d.io.write_point_cloud(os.path.join(export_dir, f"{file_prefix}_contacts_{batch_idx}.ply"), pc_o3d)
+
+        # Plane mesh
+        plane_size = 0.3
+        tangent = np.cross(normal, np.array([0.0, 1.0, 0.0]))
+        if np.linalg.norm(tangent) < 1e-3:
+            tangent = np.cross(normal, np.array([1.0, 0.0, 0.0]))
+        tangent = tangent / np.linalg.norm(tangent)
+        bitangent = np.cross(normal, tangent)
+        center = -d * normal
+
+        corners = []
+        for dx in [-1, 1]:
+            for dy in [-1, 1]:
+                corners.append(center + dx * plane_size * tangent + dy * plane_size * bitangent)
+
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(np.array(corners))
+        mesh.triangles = o3d.utility.Vector3iVector([[0, 1, 2], [2, 1, 3]])
+        mesh.paint_uniform_color([0.6, 0.6, 0.6])
+        mesh.compute_vertex_normals()
+        o3d.io.write_triangle_mesh(os.path.join(export_dir, f"{file_prefix}_plane_{batch_idx}.ply"), mesh)
+
+        # Create arrow for normal direction
+        arrow_length = 0.1
+        arrow = o3d.geometry.TriangleMesh.create_arrow(
+            cylinder_radius=0.002,
+            cone_radius=0.005,
+            cylinder_height=arrow_length * 0.8,
+            cone_height=arrow_length * 0.2
+        )
+        arrow.paint_uniform_color([1.0, 0.1, 0.1])  # red
+
+        # Align arrow to the normal vector
+        origin = center
+        z_axis = np.array([0.0, 0.0, 1.0])
+        rot_axis = np.cross(z_axis, normal)
+        angle = np.arccos(np.clip(np.dot(z_axis, normal), -1.0, 1.0))
+
+        if np.linalg.norm(rot_axis) > 1e-6:
+            rot_axis = rot_axis / np.linalg.norm(rot_axis)
+            R = o3d.geometry.get_rotation_matrix_from_axis_angle(rot_axis * angle)
+            arrow.rotate(R, center=np.array([0.0, 0.0, 0.0]))
+
+        arrow.translate(origin)
+        o3d.io.write_triangle_mesh(os.path.join(export_dir, f"{file_prefix}_normal_arrow_{batch_idx}.ply"), arrow)
+
+        print(f"Exported contact points, plane mesh, and normal arrow to {export_dir}/")
     def _grasp_success_loss():
         """
         TODO 
@@ -612,3 +768,4 @@ utils
         -implement direction cosine loss
         """
         pass
+

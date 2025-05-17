@@ -202,6 +202,49 @@ def debug_plane_loss():
     # Visualization (optional but useful)
     debugger.visualize_plane_fit(pc_batch_torch[0], plane_equations[0], contact_pts[0])
 
-if __name__ == "__main__":
-    debug_plane_loss()
 
+
+
+if __name__ == "__main__":
+    # import open3d as o3d
+    # import numpy as np
+
+    # # Load geometry
+    # pc = o3d.io.read_point_cloud("./debug_vis/support_surface_contacts_2.ply")
+    # mesh = o3d.io.read_triangle_mesh("./debug_vis/support_surface_plane_2.ply")
+    # normals = o3d.io.read_triangle_mesh("./debug_vis/support_surface_normal_arrow_2.ply")
+
+    # # Load plane equation from your own saved info
+    # # Let's say you know this:
+
+
+    # # Also add world frame at origin
+    # world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+
+    # o3d.visualization.draw_geometries([pc, mesh, normals, world_frame])
+    import torch
+    import matplotlib.pyplot as plt
+
+    # Parameters
+    alpha = 3.0
+    beta = 200.0
+
+    # Simulate distances (e.g., fro
+    # m -5cm to +5cm)
+    distances = torch.linspace(-0.1, 0.05, 500)
+    softplus = torch.nn.Softplus()
+
+    # Compute penalty using torch
+    distances = torch.clamp(distances, min=-0.02)
+    penalized = alpha * softplus(-beta * distances)
+
+    # Plot the result
+    plt.figure(figsize=(8, 5))
+    plt.plot(distances.numpy(), penalized.detach().numpy(), label='Penalty (Torch Softplus)')
+    plt.xlabel("Distance to support surface (meters)")
+    plt.ylabel("Penalty")
+    plt.title("Torch Softplus Penalty: α = 3, β = 200")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()

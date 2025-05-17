@@ -10,7 +10,7 @@ OVERWRITE_CKPT_DIR=1
 MODEL="ptv2"
 which python
 # Run the training script
-taskset -c 0,1,2,3,4,5,6,7,8,9 python /home/raphael/thesis/contact_former/contact_grasp_net/train.py \
+taskset -c 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,31,32,33,34,35,36,37,38,39 python /home/raphael/thesis/contact_former/contact_grasp_net/train.py \
     --ckpt_dir "$CKPT_DIR" \
     --overwrite_ckpt_dir "$OVERWRITE_CKPT_DIR" \
     --model "$MODEL"\
