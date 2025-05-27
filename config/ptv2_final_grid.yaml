@@ -139,9 +139,9 @@ MODEL:
     conv1d: 3
     dropout_keep: 0.7
   grid_sizes:
-  - 0.03
-  - 0.09
-  - 0.18
+  - 0.08
+  - 0.16
+  - 0.32
   in_channels: 320
   joint_head:
     conv1d: 4

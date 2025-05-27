@@ -157,6 +157,7 @@ def train(ContactGraspNet, global_config, log_dir, DEBUG):
     total_it = 0
     scheduler.step(cur_epoch)
     for epoch_it in range(cur_epoch, max_epoch):
+        cur_epoch = epoch_it
         grasp_net.train()
         pbar = tqdm.tqdm(train_loader)
         

@@ -1,6 +1,55 @@
 ** compiled at:     Mar 31 2025 09:48:48
-** execution start: 2025-05-17 21:46:09:324533
+** execution start: 2025-05-25 13:37:51:722984
 graph.cpp:initParameters:1513(3) opening config file 'rai.cfg'
 graph.cpp:initParameters:1520(3)  - failed
 graph.cpp:initParameters:1526(3) opening base config file '/root/local/rai/../local.cfg'
 graph.cpp:initParameters:1532(3)  - failed
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios' from '/home/raphael/thesis/contact_former'
+util.cpp:getIs:1076(3) opening input file 'pandaSingleTopFrontCam.g'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'panda_fixGripper.g'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios/../panda' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'panda.g'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda'
+util.cpp:getIs:1076(3) opening input file 'panda_arm_hand_conv.g'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link0.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link1.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link2.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link3.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link4.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link5.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link6.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'link7.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'hand.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_file:1049(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/panda/meshes' from '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:getIs:1076(3) opening input file 'finger.h5'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/miniconda3/envs/contact_former/lib/python3.10/site-packages/robotic/rai-robotModels/scenarios'
+util.cpp:cd_base:1040(3) entering path '/home/raphael/thesis/contact_former'
+kin_physx.cpp:prepareLinkShapes:715(-1) link 'world' does not have inertia! -> computing standard inertias (It's better if you define inertias for all links before starting physix)
+kin_physx.cpp:prepareLinkShapes:715(-1) link 'l_panda_base' does not have inertia! -> computing standard inertias (It's better if you define inertias for all links before starting physix)
+** execution stop: 2025-05-25 13:38:09:695027
+** real time: 17.9721sec
+** CPU time: 28.562
+
+** set+queried params:

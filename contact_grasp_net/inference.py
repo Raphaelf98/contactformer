@@ -27,7 +27,7 @@ def inference(model, global_config,
               skip_border_objects=False,
               z_range = [0.2,0.6],
               forward_passes=1,
-              K=None,dump_dir=None, load_model=None):
+              K=None,dump_dir=None, load_model=None, visualize=False):   
     """
     Predict 6-DoF grasp distribution for given model and input data
     
@@ -103,7 +103,8 @@ def inference(model, global_config,
 
         # Visualize results          
         # show_image(rgb, segmap)
-        visualize_grasps(pc_full, pred_grasps_cam, scores, plot_opencv_cam=True, pc_colors=pc_colors)
+        if visualize:
+            visualize_grasps(pc_full, pred_grasps_cam, scores, plot_opencv_cam=True, pc_colors=pc_colors)
         save_grasps_to_npy(pc_full,contact_pts, scores, dump_dir, checkpoint_name=os.path.basename(os.path.normpath(ckpt_dir)) )
     if not glob.glob(input_paths):
         print('No files found: ', input_paths)
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     # parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/test_data/8.npy', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
     parser.add_argument('--np_path', default='/home/raphael/thesis/contact_former/acronym_scenes/005251/007.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
     # parser.add_argument('--np_path', default='/home/ssdArray/datasets/grasp_planning_datasets/acronym/acronym/renders/000001/000.npz', help='Input data: npz/npy file with keys either "depth" & camera matrix "K" or just point cloud "pc" in meters. Optionally, a 2D "segmap"')
-
+    parser.add_argument('--visualize', action='store_true', default=False, help='Visualize grasps in Open3D')
     parser.add_argument('--K', default=None, help='Flat Camera Matrix, pass as "[fx, 0, cx, 0, fy, cy, 0, 0 ,1]"')
     parser.add_argument('--z_range', default=[0.2,1.8], help='Z value threshold to crop the input point cloud')
     parser.add_argument('--local_regions', action='store_true', default=False, help='Crop 3D local regions around given segments.')
@@ -131,7 +132,7 @@ if __name__ == "__main__":
 
     # FLAGS.np_path = BASE_DIR + FLAGS.np_path
     if torch.cuda.is_available():
-       print("CUDA is available! 🎉")
+       print("CUDA is available!")
        print(f"CUDA Device Name: {torch.cuda.get_device_name(0)}")
        print(f"CUDA Device Count: {torch.cuda.device_count()}")
        print("Device name:", torch.cuda.get_device_name(torch.cuda.current_device()))
@@ -162,4 +163,4 @@ if __name__ == "__main__":
               skip_border_objects=FLAGS.skip_border_objects,
               z_range=eval(str(FLAGS.z_range)),
               forward_passes=FLAGS.forward_passes,
-              K=eval(str(FLAGS.K)), dump_dir=FLAGS.dump_dir, load_model=FLAGS.load_model)
+              K=eval(str(FLAGS.K)), dump_dir=FLAGS.dump_dir, load_model=FLAGS.load_model, visualize=FLAGS.visualize)
