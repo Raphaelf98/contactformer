@@ -1,132 +1,195 @@
-# Contact Former
+# ContactFormer
 
-This is a pytorch implementation of Contact-GraspNet. The original tensorflow
-implementation can be found at [https://github.com/NVlabs/contact_graspnet](https://github.com/NVlabs/contact_graspnet).
+ContactFormer is a novel 6-DoF robotic grasp prediction network proposed in the Master's thesis *"Comparative Analysis of Deep Learning-Based 6DoF Grasp Pose Estimation Methods"* (Raphael Ullrich, TU Berlin, 2025). It replaces the PointNet++ backbone of [Contact-GraspNet](https://github.com/NVlabs/contact_graspnet) with a grouped vector attention (GVA) encoder-decoder derived from [Point Transformer V2](https://arxiv.org/abs/2203.02301), enabling more expressive feature learning for scene-level grasp planning.
 
-### Disclaimer
-This is not an official implementation of Contact-GraspNet.  The results shown here have been evaluated
-empirically and may not match the results in the original paper.  This code is provided as-is and is not
-guaranteed to work.  Please use at your own risk.
+> **Note:** This repository contains a PyTorch re-implementation of Contact-GraspNet (the original TensorFlow implementation is [here](https://github.com/NVlabs/contact_graspnet)) as well as the ContactFormer extension. Results have been evaluated empirically and may not match the original paper. This code is provided as-is.
 
-Additionally, this code implements the core features of Contact-GraspNet as presented
-by the authors.  It does not implement all possible configuration as implemented in the original
-tensorflow implementation.  If you implement additional features, please consider submitting a pull request.
+---
 
+## Overview
 
-### Contact-GraspNet: Efficient 6-DoF Grasp Generation in Cluttered Scenes
-Martin Sundermeyer, Arsalan Mousavian, Rudolph Triebel, Dieter Fox
-ICRA 2021
+Given a raw point cloud of a cluttered tabletop scene captured from a single viewpoint, ContactFormer predicts collision-free, scene-level 6-DoF parallel-jaw gripper poses. Each predicted grasp pose *g = (R, t)* is fully described by:
 
-[paper](https://arxiv.org/abs/2103.14127), [project page](https://research.nvidia.com/publication/2021-03_Contact-GraspNet%3A--Efficient), [video](http://www.youtube.com/watch?v=qRLKYSLXElM)
+- a contact point *c ∈ P*
+- an approach vector *â*
+- a grasp direction *b̂*
+- a predicted grasp width *ŵ*
 
-<p align="center">
-  <img src="examples/2.gif" width="640" title="UOIS + Contact-GraspNet"/>
-</p>
+### Architecture
+
+ContactFormer modifies the ContactGraspNet pipeline in the following way:
+
+1. **MsgSA layer** — A multi-scale grouping set-abstraction (MsgSA) layer from PointNet++ downsamples the 20 000-point input to 2 048 points while aggregating multi-scale local features (radii: 0.02 m, 0.04 m, 0.08 m; 320 output channels). This bridges the input size to the transformer backbone.
+2. **Symmetric Point Transformer V2 encoder-decoder** — A three-stage encoder-decoder with skip connections replaces the original PointNet++ backbone. The encoder uses 2, 6, and 2 transformer blocks across its stages with feature dimensions of 384 → 384 → 512, starting from 320 input channels. Each stage uses grouped vector attention (GVA) with grid pooling (grid sizes: 0.04 m, 0.08 m, 0.16 m, tuned for tabletop-scale scenes). The decoder reconstructs 2 048 points with 256 features using channel sizes 384 → 256 → 256.
+3. **ContactGraspNet heads** — The original four 1D-CNN prediction heads (approach direction, grasp direction, grasp confidence, grasp width) are kept unchanged.
+
+### Support Surface Loss (SSLoss)
+
+A persistent challenge in scene-level grasp prediction is that networks produce high-confidence grasps on the edges of the point cloud — typically the tabletop surface. ContactFormer introduces a novel **support surface loss** to address this at training time.
+
+The loss uses RANSAC to estimate the supporting plane in each scene point cloud and penalizes high-confidence contact predictions that fall close to or below that plane:
+
+```
+l(δ) = log(1 + α · exp(−β·δ))   for −0.02 ≤ δ ≤ 1.0
+```
+
+where *δ* is the signed distance from the contact point to the estimated plane, *α = 1*, and *β = 100*. The total support surface loss is weighted by the predicted confidence score and averaged over the top-512 predictions per batch. This conditions the network to assign lower confidence near the supporting surface without requiring post-processing filtering.
+
+### Training
+
+All ContactFormer variants are trained on the [Acronym dataset](https://github.com/NVlabs/acronym) (17.7 M simulated parallel-jaw grasps on 8 872 ShapeNetSem objects). The Acronym pipeline renders synthetic cluttered tabletop scenes with per-point grasp labels that are compatible with the ContactGraspNet training code.
+
+The following model variants are provided:
+
+| Model | Backbone | Support Surface Loss |
+|---|---|---|
+| ContactGraspNet (CGN) | PointNet++ | No |
+| CGN + SSLoss | PointNet++ | Yes |
+| **ContactFormer (CF)** | **Point Transformer V2** | **No** |
+| **CF + SSLoss** | **Point Transformer V2** | **Yes** |
+
+### Results
+
+Experiments were conducted in physical simulation (PhysX via RAI) and on a real Franka Emika Panda robot across grasp-and-shake, table-clear, and pick-and-drop tasks.
+
+| Model | Combined Success Rate |
+|---|---|
+| O-CGN (original TF checkpoint) | 68.5% |
+| ContactFormer (CF) | 58% |
+| ContactGraspNet (CGN) | 47% |
+
+ContactFormer outperforms the PyTorch-trained ContactGraspNet baseline. The support surface loss was shown to meaningfully reduce boundary grasps during training (object grasp ratio improvement of ~262% for CF, from Or = 0.08 to Or = 0.29).
+
+---
 
 ## Installation
-This code has been tested with python 3.9.
 
-Create the conda env.
+### ContactFormer (Point Transformer V2)
+
+```bash
+conda create -n contact_former python=3.10
+conda install pytorch==2.5.1 torchvision==0.20.1 pytorch-cuda=12.4 -c pytorch -c nvidia
+conda install h5py pyyaml -c anaconda -y
+conda install sharedarray tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
+pip install torch-cluster -f https://data.pyg.org/whl/torch-2.5.0+cu124.html
+pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.0+cu124.html
+pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.5.0+cu124.html
+pip install torch_geometric
 ```
+
+### ContactGraspNet (PyTorch baseline)
+
+```bash
 conda env create -f contact_graspnet_env.yml
-```
-
-Install as a package.
-```
+conda activate pytorch_cuda_env
 pip3 install -e .
 ```
 
-### Troubleshooting
-
-N/A
-
-
 ### Hardware
-Training:
-  Tested with 1x Nvidia GPU >= 24GB VRAM.  Reduce batch size if you have less VRAM.
 
-Inference: 1x Nvidia GPU >= 8GB VRAM (might work with less).
+- **Training:** 1× NVIDIA GPU with ≥ 24 GB VRAM (tested on RTX 3090). Reduce batch size if needed.
+- **Inference:** 1× NVIDIA GPU with ≥ 8 GB VRAM.
 
+---
 
 ## Inference
-Model weights are included in the `checkpoints` directory.  Test data can be found in the `test_data` directory.
 
-Contact-GraspNet can directly predict a 6-DoF grasp distribution from a raw scene point cloud. However, to obtain object-wise grasps, remove background grasps and to achieve denser proposals it is highly recommended to use (unknown) object segmentation.  We used [FastSAM](https://github.com/CASIA-IVA-Lab/FastSAM) for unknown object segmentation (in contrast to the original tensorflow implementation which uses [UIOS](https://github.com/chrisdxie/uois)).  Note: Infrastructure for segmentation is not included in this repository.
+Model weights are included in the `checkpoints` directory. Test data can be found in `test_data/`.
 
-Given a .npy/.npz file with a depth map (in meters), camera matrix K and (optionally) a 2D segmentation map, execute:
+ContactFormer can directly predict a 6-DoF grasp distribution from a raw scene point cloud. For object-wise grasps, removing background grasps, and denser proposals, it is recommended to use an object segmentation front-end. This repository was tested with [FastSAM](https://github.com/CASIA-IVA-Lab/FastSAM) for unknown object segmentation (infrastructure not included).
 
-```shell
-python contact_graspnet_pytorch/inference.py \
+**From a depth map (`.npy`/`.npz`) with camera matrix K and optional segmentation map:**
+
+```bash
+python contact_grasp_net/inference.py \
        --np_path="test_data/*.npy" \
        --local_regions --filter_grasps
 ```
 
-<p align="center">
-  <img src="examples/7.png" width="640" title="UOIS + Contact-GraspNet"/>
-</p>
-Note: This image is from the original Contact-GraspNet repo.  Results may vary.
---> close the window to go to next scene
+**From a raw 3D point cloud:**
 
-Given a .npy/.npz file with just a 3D point cloud (in meters), execute [for example](examples/realsense_crop_sigma_001.png):
-```shell
+```bash
 python contact_graspnet/inference.py --np_path=/path/to/your/pc.npy \
                                      --forward_passes=5 \
                                      --z_range=[0.2,1.1]
 ```
 
-`--np_path`: input .npz/.npy file(s) with 'depth', 'K' and optionally 'segmap', 'rgb' keys. For processing a Nx3 point cloud instead use 'xzy' and optionally 'xyz_color' as keys.
-`--ckpt_dir`: relative path to checkpooint directory. By default `checkpoint/scene_test_2048_bs3_hor_sigma_001` is used. For very clean / noisy depth data consider `scene_2048_bs3_rad2_32` / `scene_test_2048_bs3_hor_sigma_0025` trained with no / strong noise.
-`--local_regions`: Crop 3D local regions around object segments for inference. (only works with segmap)
-`--filter_grasps`: Filter grasp contacts such that they only lie on the surface of object segments. (only works with segmap)
-`--skip_border_objects` Ignore segments touching the depth map boundary.
-`--forward_passes` number of (batched) forward passes. Increase to sample more potential grasp contacts.
-`--z_range` [min, max] z values in meter used to crop the input point cloud, e.g. to avoid grasps in the foreground/background(as above).
-`--arg_configs TEST.second_thres:0.19 TEST.first_thres:0.23` Overwrite config confidence thresholds for successful grasp contacts to get more/less grasp proposals
+**Key inference flags:**
 
+| Flag | Description |
+|---|---|
+| `--np_path` | Input `.npz`/`.npy` file(s). Keys: `depth`, `K`, optionally `segmap`, `rgb`; or `xyz` / `xyz_color` for a raw Nx3 point cloud. |
+| `--ckpt_dir` | Path to checkpoint directory (default: `checkpoint/scene_test_2048_bs3_hor_sigma_001`). |
+| `--local_regions` | Crop 3D local regions around object segments (requires `segmap`). |
+| `--filter_grasps` | Filter contact points to object segment surfaces (requires `segmap`). |
+| `--skip_border_objects` | Ignore segments touching the depth map boundary. |
+| `--forward_passes` | Number of batched forward passes; increase to sample more grasp contacts. |
+| `--z_range` | `[min, max]` depth range in metres to crop the input point cloud. |
+
+---
 
 ## Training
 
-### Set up Acronym Dataset
+### Set Up Acronym Dataset
 
-Follow the instructions at [docs/acronym_setup.md](docs/acronym_setup.md) to set up the Acronym dataset.
+Follow the instructions in [docs/acronym_setup.md](docs/acronym_setup.md).
 
 ### Set Environment Variables
-When training on a headless server set the environment variable
-```shell
+
+On a headless server, set:
+
+```bash
 export PYOPENGL_PLATFORM='egl'
 ```
-This is also done automatically in the training script.
 
-### Quickstart Training
+This is also handled automatically in the training script.
 
-Start training with config `contact_graspnet_pytorch/config.yaml`
-```
+### Quickstart
+
+```bash
 python3 contact_graspnet_pytorch/train.py --data_path acronym/
 ```
 
-### Additional Training Options
+### Additional Options
 
-To set a custom model name and custom data path:
-
-```
+```bash
+# Custom model name and data path
 python contact_graspnet/train.py --ckpt_dir checkpoints/your_model_name \
                                  --data_path /path/to/acronym/data
-```
 
-To restart a previous batch
-```
+# Resume a previous run
 python contact_graspnet/train.py --ckpt_dir checkpoints/previous_model_name \
                                  --data_path /path/to/acronym/data
 ```
 
-### Generate Contact Grasps and Scenes yourself (optional)
+### Generate Scenes Yourself (optional)
 
-See [docs/generate_scenes.md](docs/generate_scenes.md) for instructions on how to generate scenes and grasps yourself.
+See [docs/generate_scenes.md](docs/generate_scenes.md).
 
-## Citation
-If you find this work useful, please consider citing the author's original work and starring this repo.
+---
+
+## Repository Structure
 
 ```
+contactformer/
+├── contact_grasp_net/          # ContactFormer and ContactGraspNet model code
+├── Pointcept/                  # Point Transformer V2 (PTv3) components
+├── Pointnet_Pointnet2_pytorch/ # PointNet++ components (MsgSA layer)
+├── gripper_control_points/     # Franka Panda gripper geometry
+├── gripper_models/             # Gripper mesh models
+├── scripts/                    # Utility scripts
+├── test_data/                  # Sample point clouds for inference
+├── train.py                    # Training entry point
+└── contact_former_env.yaml     # Conda environment
+```
+
+---
+
+## Citation
+
+If you use this work, please consider citing the original Contact-GraspNet paper and starring this repository:
+
+```bibtex
 @article{sundermeyer2021contact,
   title={Contact-GraspNet: Efficient 6-DoF Grasp Generation in Cluttered Scenes},
   author={Sundermeyer, Martin and Mousavian, Arsalan and Triebel, Rudolph and Fox, Dieter},
@@ -134,26 +197,14 @@ If you find this work useful, please consider citing the author's original work 
   year={2021}
 }
 ```
-# QUICK START
 
-Install conda env 
-```
-conda env create -f cgn_env.yml
-conda activate pytorch_cuda_env
-```
-Launch inference, from /contact_graspnet_pt dir
-```
-python contact_grasp_net/inference.py
-```
-# Point Transformer v3 install
+The Point Transformer V2 backbone:
 
-```
-conda create -n contact_former python=3.10
-conda install pytorch==2.5.1 torchvision==0.20.1 pytorch-cuda=12.4 -c pytorch -c nvidia
-conda install h5py pyyaml -c anaconda -y
-conda install sharedarray tensorboard tensorboardx yapf addict einops scipy plyfile termcolor timm -c conda-forge -y
-pip install torch-cluster -f https://data.pyg.org/whl/torch-2.5.0+${124}.html
-pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.0+${124}.html
-pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.5.0+${124}.html
-pip install torch_geometric
+```bibtex
+@inproceedings{wu2022point,
+  title={Point Transformer V2: Grouped Vector Attention and Partition-based Pooling},
+  author={Wu, Xiaoyang and Lao, Yixing and Jiang, Li and Liu, Xihui and Zhao, Hengshuang},
+  booktitle={NeurIPS},
+  year={2022}
+}
 ```
