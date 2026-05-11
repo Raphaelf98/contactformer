@@ -1,4 +1,4 @@
-# Contact-GraspNet Pytorch
+# Contact Former
 
 This is a pytorch implementation of Contact-GraspNet. The original tensorflow
 implementation can be found at [https://github.com/NVlabs/contact_graspnet](https://github.com/NVlabs/contact_graspnet).
